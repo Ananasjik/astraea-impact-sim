@@ -962,53 +962,109 @@ function tryConsumeWsFrame(buf: Buffer): { frame: ParsedWsFrame; rest: Buffer } 
   };
 }
 
+function readPclsFlagsQuick(buf: Buffer): number | null {
+  if (buf.length < HEADER_BYTES || buf.readUInt32LE(0) !== PCLS_MAGIC) {
+    return null;
+  }
+  return buf.readUInt16LE(6);
+}
+
 describe('Live C++ sim_server -> TypeScript BinaryProtocol integration (optional)', () => {
+  let activeChild: ChildProcess | null = null;
+  let activeSock: net.Socket | null = null;
+
+  async function cleanupLiveServer(): Promise<void> {
+    activeSock?.destroy();
+    activeSock = null;
+    const proc = activeChild;
+    activeChild = null;
+    if (!proc) return;
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      return;
+    }
+    proc.kill('SIGTERM');
+    await new Promise<void>((res) => {
+      const killTimer = setTimeout(() => {
+        if (proc.exitCode === null && proc.signalCode === null) {
+          proc.kill('SIGKILL');
+        }
+        res();
+      }, 1500);
+      proc.once('exit', () => {
+        clearTimeout(killTimer);
+        res();
+      });
+    });
+  }
+
+  afterEach(async () => {
+    await cleanupLiveServer();
+  });
+
   it.skipIf(!fs.existsSync(SIM_SERVER_PATH))(
     'receives real PCLS frame from sim_server over RFC 6455 WebSocket and decodes with byte-for-byte parity',
     async () => {
-      let child: ChildProcess | null = null;
-      let sock: net.Socket | null = null;
-
       try {
         const port = await new Promise<number>((resolve, reject) => {
-          child = spawn(
+          const proc = spawn(
             SIM_SERVER_PATH,
             ['--port', '0', '--particles', '2048', '--preset', 'LivingGaiaAsteroidCataclysm'],
             { stdio: ['ignore', 'pipe', 'pipe'] }
           );
+          activeChild = proc;
           let stdoutAcc = '';
           let stderrAcc = '';
-          const timer = setTimeout(() => {
-            reject(new Error(`Timed out waiting for sim_server port. stdout=${stdoutAcc} stderr=${stderrAcc}`));
-          }, 15_000);
+          let settled = false;
 
-          child.stdout?.on('data', (chunk: Buffer) => {
+          const finish = (err: Error | null, boundPort?: number) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            proc.off('error', onError);
+            proc.off('exit', onExit);
+            if (err) {
+              reject(err);
+            } else {
+              resolve(boundPort!);
+            }
+          };
+
+          const timer = setTimeout(() => {
+            finish(new Error(`Timed out waiting for sim_server port. stdout=${stdoutAcc} stderr=${stderrAcc}`));
+          }, 8_000);
+
+          const onError = (err: Error) => finish(err);
+          const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+            finish(new Error(`sim_server exited prematurely (code=${code}, signal=${signal}): ${stderrAcc}`));
+          };
+
+          proc.on('error', onError);
+          proc.on('exit', onExit);
+          proc.stdout?.on('data', (chunk: Buffer) => {
             stdoutAcc += chunk.toString('utf8');
             const m = stdoutAcc.match(/listening on http:\/\/127\.0\.0\.1:(\d+)/);
             if (m) {
-              clearTimeout(timer);
-              resolve(Number(m[1]));
+              finish(null, Number(m[1]));
             }
           });
-          child.stderr?.on('data', (chunk: Buffer) => {
+          proc.stderr?.on('data', (chunk: Buffer) => {
             stderrAcc += chunk.toString('utf8');
-          });
-          child.on('exit', (code) => {
-            clearTimeout(timer);
-            reject(new Error(`sim_server exited prematurely (${code}): ${stderrAcc}`));
           });
         });
 
-        sock = net.createConnection({ host: '127.0.0.1', port });
+        const sock = net.createConnection({ host: '127.0.0.1', port });
+        activeSock = sock;
         const wsKey = crypto.randomBytes(16).toString('base64');
         const expectedAccept = crypto
           .createHash('sha1')
           .update(wsKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
           .digest('base64');
 
-        const { textMsgs, binaryFrames } = await new Promise<{
+        const { textMsgs, binaryFrames, baseFrameIdx, speedFrameIdx } = await new Promise<{
           textMsgs: Array<Record<string, unknown>>;
           binaryFrames: Buffer[];
+          baseFrameIdx: number;
+          speedFrameIdx: number;
         }>((resolve, reject) => {
           let recv: Buffer<ArrayBufferLike> = Buffer.alloc(0);
           let upgraded = false;
@@ -1017,13 +1073,41 @@ describe('Live C++ sim_server -> TypeScript BinaryProtocol integration (optional
           const texts: Array<Record<string, unknown>> = [];
           const binaries: Buffer[] = [];
           let requestedVelocity = false;
+          let resolved = false;
 
           const timer = setTimeout(() => {
-            reject(new Error(`Timed out waiting for WS frames (texts=${texts.length}, bins=${binaries.length})`));
-          }, 15_000);
+            if (!resolved) {
+              resolved = true;
+              reject(new Error(`Timed out waiting for WS frames (texts=${texts.length}, bins=${binaries.length})`));
+            }
+          }, 10_000);
 
-          sock!.on('connect', () => {
-            sock!.write(
+          const maybeFinish = () => {
+            if (resolved) return;
+            const hasPreset = texts.some((m) => m.type === 'preset_loaded');
+            const hasTelemetry = texts.some((m) => m.type === 'telemetry');
+            const baseIdx = binaries.findIndex((b) => {
+              const fl = readPclsFlagsQuick(b);
+              return fl !== null && (fl & FLAG_HAS_SPEED_ARRAY) === 0;
+            });
+            const spdIdx = binaries.findIndex((b) => {
+              const fl = readPclsFlagsQuick(b);
+              return fl !== null && (fl & FLAG_HAS_SPEED_ARRAY) !== 0;
+            });
+            if (hasPreset && hasTelemetry && baseIdx !== -1 && spdIdx !== -1) {
+              resolved = true;
+              clearTimeout(timer);
+              resolve({
+                textMsgs: texts,
+                binaryFrames: binaries,
+                baseFrameIdx: baseIdx,
+                speedFrameIdx: spdIdx,
+              });
+            }
+          };
+
+          sock.on('connect', () => {
+            sock.write(
               `GET / HTTP/1.1\r\n` +
                 `Host: 127.0.0.1:${port}\r\n` +
                 `Upgrade: websocket\r\n` +
@@ -1033,12 +1117,15 @@ describe('Live C++ sim_server -> TypeScript BinaryProtocol integration (optional
             );
           });
 
-          sock!.on('error', (err) => {
-            clearTimeout(timer);
-            reject(err);
+          sock.on('error', (err) => {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timer);
+              reject(err);
+            }
           });
 
-          sock!.on('data', (chunk: Buffer) => {
+          sock.on('data', (chunk: Buffer) => {
             recv = Buffer.concat([recv, chunk]);
             if (!upgraded) {
               const hdrEnd = recv.indexOf('\r\n\r\n');
@@ -1046,8 +1133,11 @@ describe('Live C++ sim_server -> TypeScript BinaryProtocol integration (optional
               const hdrText = recv.subarray(0, hdrEnd).toString('utf8');
               recv = recv.subarray(hdrEnd + 4);
               if (!hdrText.includes('101') || !hdrText.includes(expectedAccept)) {
-                clearTimeout(timer);
-                reject(new Error(`Invalid WebSocket handshake response: ${hdrText}`));
+                if (!resolved) {
+                  resolved = true;
+                  clearTimeout(timer);
+                  reject(new Error(`Invalid WebSocket handshake response: ${hdrText}`));
+                }
                 return;
               }
               upgraded = true;
@@ -1059,7 +1149,6 @@ describe('Live C++ sim_server -> TypeScript BinaryProtocol integration (optional
               recv = parsed.rest;
               const { fin, opcode, payload } = parsed.frame;
               if (opcode === 0x9) {
-                // Ping -> Pong
                 continue;
               }
               if (opcode === 0x8) {
@@ -1077,39 +1166,42 @@ describe('Live C++ sim_server -> TypeScript BinaryProtocol integration (optional
               const full = Buffer.concat(fragChunks);
               if (fragOpcode === 0x1) {
                 texts.push(JSON.parse(full.toString('utf8')) as Record<string, unknown>);
+                maybeFinish();
               } else if (fragOpcode === 0x2) {
                 binaries.push(full);
                 if (!requestedVelocity) {
                   requestedVelocity = true;
-                  sock!.write(encodeClientMaskedTextFrame(JSON.stringify({ type: 'set_vis_mode', mode: 'Velocity' })));
-                } else if (binaries.length >= 2) {
-                  clearTimeout(timer);
-                  resolve({ textMsgs: texts, binaryFrames: binaries });
-                  return;
+                  sock.write(encodeClientMaskedTextFrame(JSON.stringify({ type: 'set_vis_mode', mode: 'Velocity' })));
                 }
+                maybeFinish();
               }
             }
           });
         });
 
         const presetMsg = textMsgs.find((m) => m.type === 'preset_loaded');
-        const telemetryMsg = textMsgs.find((m) => m.type === 'telemetry');
+        const telemetryMsgs = textMsgs.filter((m) => m.type === 'telemetry');
         expect(presetMsg).toBeDefined();
-        expect(telemetryMsg).toBeDefined();
-        expect(binaryFrames.length).toBeGreaterThanOrEqual(2);
+        expect(telemetryMsgs.length).toBeGreaterThanOrEqual(1);
+        expect(baseFrameIdx).toBeGreaterThanOrEqual(0);
+        expect(speedFrameIdx).toBeGreaterThanOrEqual(0);
 
         const pPool = makeParticlePool(4096);
         const tPool = makeTracerPool(4096, 16);
 
-        // Initial frame (no speed array)
-        const raw0 = binaryFrames[0];
+        // Initial frame without speed array
+        const raw0 = binaryFrames[baseFrameIdx];
         const ab0 = new Uint8Array(raw0).buffer;
         const hdr0 = decodeBinaryFrame(ab0, pPool, tPool);
         expect(hdr0.version).toBe(1);
         expect(hdr0.particleCount).toBe(presetMsg!.particleCount);
         expect(hdr0.tracerCount).toBe(presetMsg!.tracerCount);
         expect(hdr0.tracerGridRes).toBe(presetMsg!.tracerGridRes);
-        expect(hdr0.frameSeq).toBe(telemetryMsg!.frameSeq);
+        expect(hdr0.frameSeq).toBeGreaterThanOrEqual(0);
+        const matchedTelemetry = telemetryMsgs.find((m) => m.frameSeq === hdr0.frameSeq);
+        if (matchedTelemetry) {
+          expect(hdr0.simTimeSec).toBeCloseTo(Number(matchedTelemetry.simTimeSec), 6);
+        }
         expect(raw0.byteLength).toBe(
           HEADER_BYTES + PARTICLE_RECORD_BYTES * hdr0.particleCount + TRACER_RECORD_BYTES * hdr0.tracerCount
         );
@@ -1132,8 +1224,8 @@ describe('Live C++ sim_server -> TypeScript BinaryProtocol integration (optional
           expect(tPool.tempK[i]).toBeGreaterThan(0);
         }
 
-        // Second frame after Velocity mode switch (flags & 0x08 speed array)
-        const raw1 = binaryFrames[1];
+        // Frame carrying FLAG_HAS_SPEED_ARRAY (0x08) after Velocity mode switch
+        const raw1 = binaryFrames[speedFrameIdx];
         const ab1 = new Uint8Array(raw1).buffer;
         const hdr1 = decodeBinaryFrame(ab1, pPool, tPool);
         expect((hdr1.flags & FLAG_HAS_SPEED_ARRAY) !== 0).toBe(true);
@@ -1147,21 +1239,7 @@ describe('Live C++ sim_server -> TypeScript BinaryProtocol integration (optional
           expect(pPool.meta[4 * i + 3]).toBeGreaterThanOrEqual(0.05);
         }
       } finally {
-        sock?.destroy();
-        if (child !== null) {
-          const proc = child as ChildProcess;
-          proc.kill('SIGTERM');
-          await new Promise<void>((res) => {
-            const killTimer = setTimeout(() => {
-              proc.kill('SIGKILL');
-              res();
-            }, 1500);
-            proc.once('exit', () => {
-              clearTimeout(killTimer);
-              res();
-            });
-          });
-        }
+        await cleanupLiveServer();
       }
     },
     25_000

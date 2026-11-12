@@ -147,10 +147,10 @@ function createMockCoupler() {
           OceanReef: 100,
         },
         survivalByGuild: {
-          LargeHerbivore: 100,
-          ApexPredator: 100,
+          HerbivoreHerd: 100,
+          PursuitPredator: 100,
           AvianFlock: 100,
-          BurrowingRodent: 100,
+          PelagicMarine: 100,
           Flora: 100,
         },
         extinctionTier: 'Nominal' as const,
@@ -177,6 +177,88 @@ function findUniformValue(
     }
   }
   return undefined;
+}
+
+function findNumericUniformValue(
+  uniforms: Record<string, THREE.IUniform<unknown>>,
+  pattern: RegExp
+): number | undefined {
+  for (const [key, u] of Object.entries(uniforms)) {
+    if (pattern.test(key) && typeof u.value === 'number') {
+      return u.value;
+    }
+  }
+  return undefined;
+}
+
+function sampleMeshWorldStats(
+  mesh: THREE.Mesh,
+  camPosKm: [number, number, number],
+  comKm: [number, number, number]
+): { minR: number; maxR: number; meanR: number; meanDirX: number; count: number } | null {
+  const posAttr = mesh.geometry.getAttribute('position');
+  if (!posAttr || posAttr.count === 0) return null;
+  let minR = Infinity;
+  let maxR = -Infinity;
+  let sumR = 0;
+  let sumDirX = 0;
+  const v = new THREE.Vector3();
+  const stride = Math.max(1, Math.floor(posAttr.count / 128));
+  let sampled = 0;
+  for (let i = 0; i < posAttr.count; i += stride) {
+    v.set(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(mesh.matrixWorld);
+    const dx = camPosKm[0] + v.x - comKm[0];
+    const dy = camPosKm[1] + v.y - comKm[1];
+    const dz = camPosKm[2] + v.z - comKm[2];
+    const r = Math.hypot(dx, dy, dz);
+    if (r > 0) {
+      minR = Math.min(minR, r);
+      maxR = Math.max(maxR, r);
+      sumR += r;
+      sumDirX += dx / r;
+      sampled++;
+    }
+  }
+  if (sampled === 0) return null;
+  return {
+    minR,
+    maxR,
+    meanR: sumR / sampled,
+    meanDirX: sumDirX / sampled,
+    count: sampled,
+  };
+}
+
+function hasCrackDissolveEvidence(mesh: THREE.Mesh): boolean {
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  for (const mat of materials) {
+    if (mat instanceof THREE.ShaderMaterial) {
+      for (const [key, uniform] of Object.entries(mat.uniforms)) {
+        if (
+          /dissolve|crack|fracture|damage/i.test(key) &&
+          typeof uniform.value === 'number' &&
+          uniform.value >= 0.1 &&
+          uniform.value <= 1.0
+        ) {
+          return true;
+        }
+      }
+      const glsl = `${mat.vertexShader}\n${mat.fragmentShader}`;
+      if (/dissolve|crack|fracture|damage/i.test(glsl)) {
+        for (const [attrName, attr] of Object.entries(mesh.geometry.attributes)) {
+          if (/damage|dissolve|crack|fracture/i.test(attrName) && attr.count > 0) {
+            for (let i = 0; i < attr.count; i++) {
+              const val = attr.getX(i);
+              if (val >= 0.55 && val < 0.85) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
 }
 
 describe('OrbitalSurfaceCamera - AC-14', () => {
@@ -315,9 +397,10 @@ describe('SphParticleRenderer & AtmosphereShader - AC-15', () => {
     expect(mat.fragmentShader.length).toBeGreaterThan(40);
 
     const combinedGlsl = `${mat.vertexShader}\n${mat.fragmentShader}`;
-    expect(combinedGlsl).toContain('uVisMode');
+    const visModeKey = Object.keys(mat.uniforms).find((k) => /vis.*mode|uMode/i.test(k));
+    expect(visModeKey).toBeDefined();
+    expect(combinedGlsl).toContain(visModeKey!);
     expect(mat.fragmentShader).toMatch(/\bdiscard\b/);
-    expect(mat.uniforms.uVisMode).toBeDefined();
 
     const sliceKeys = Object.keys(mat.uniforms).filter((k) => /slice/i.test(k));
     expect(sliceKeys.length).toBeGreaterThan(0);
@@ -334,19 +417,40 @@ describe('SphParticleRenderer & AtmosphereShader - AC-15', () => {
     const seenModeValues = new Set<unknown>();
     for (const mode of modes) {
       renderer.setVisMode(mode);
-      seenModeValues.add(mat.uniforms.uVisMode.value);
+      seenModeValues.add(mat.uniforms[visModeKey!].value);
     }
     expect(seenModeValues.size).toBe(6);
 
-    // Slice plane toggle
-    renderer.setSlicePlane(true, new THREE.Vector3(0, 1, 0), 250, [10, 0, 0]);
+    // Slice plane toggle with non-unit normal to verify normalization + offset uniform
+    renderer.setSlicePlane(true, new THREE.Vector3(0, 2, 0), 250, [10, 0, 0]);
     const sliceEnabledOn = findUniformValue(mat.uniforms, /slice.*enabled|uSliceEnabled/i);
     expect(Boolean(sliceEnabledOn)).toBe(true);
 
     const sliceNormalVal = findUniformValue(mat.uniforms, /slice.*normal/i);
+    const slicePlaneVal = findUniformValue(mat.uniforms, /slice.*plane/i);
+    let verifiedSliceNormal = false;
     if (sliceNormalVal instanceof THREE.Vector3) {
+      expect(sliceNormalVal.length()).toBeCloseTo(1, 4);
       expect(sliceNormalVal.y).toBeCloseTo(1, 4);
+      verifiedSliceNormal = true;
+    } else if (slicePlaneVal instanceof THREE.Vector4) {
+      const nLen = Math.hypot(slicePlaneVal.x, slicePlaneVal.y, slicePlaneVal.z);
+      expect(nLen).toBeCloseTo(1, 4);
+      expect(slicePlaneVal.y).toBeCloseTo(1, 4);
+      verifiedSliceNormal = true;
     }
+    expect(verifiedSliceNormal).toBe(true);
+
+    const sliceOffsetVal = findNumericUniformValue(mat.uniforms, /slice.*(offset|dist)/i);
+    let verifiedSliceOffset = false;
+    if (typeof sliceOffsetVal === 'number') {
+      expect(sliceOffsetVal).toBeCloseTo(250, 4);
+      verifiedSliceOffset = true;
+    } else if (slicePlaneVal instanceof THREE.Vector4) {
+      expect(Math.abs(slicePlaneVal.w)).toBeGreaterThan(200);
+      verifiedSliceOffset = true;
+    }
+    expect(verifiedSliceOffset).toBe(true);
 
     renderer.setSlicePlane(false, new THREE.Vector3(0, 1, 0), 250, [10, 0, 0]);
     const sliceEnabledOff = findUniformValue(mat.uniforms, /slice.*enabled|uSliceEnabled/i);
@@ -406,15 +510,15 @@ describe('SphParticleRenderer & AtmosphereShader - AC-15', () => {
     expect(atmo.mesh.position.y).toBeCloseTo(0, 2);
     expect(atmo.mesh.position.z).toBeCloseTo(0, 2);
 
-    const tauVal = findUniformValue(mat.uniforms, /tau|optical/i);
+    const tauVal = findNumericUniformValue(mat.uniforms, /tau|optical/i);
     expect(tauVal).toBeCloseTo(3.5, 4);
 
-    const glowVal = findUniformValue(mat.uniforms, /plume|glow/i);
+    const glowVal = findNumericUniformValue(mat.uniforms, /plume|glow/i);
     expect(glowVal).toBeCloseTo(4500, 2);
 
     atmo.update(camPosKm, comKm, 6371, sunDir, 0.0, 288);
-    expect(findUniformValue(mat.uniforms, /tau|optical/i)).toBeCloseTo(0.0, 4);
-    expect(findUniformValue(mat.uniforms, /plume|glow/i)).toBeCloseTo(288, 2);
+    expect(findNumericUniformValue(mat.uniforms, /tau|optical/i)).toBeCloseTo(0.0, 4);
+    expect(findNumericUniformValue(mat.uniforms, /plume|glow/i)).toBeCloseTo(288, 2);
 
     atmo.dispose();
   });
@@ -540,7 +644,8 @@ describe('CubeSphereLod - AC-16', () => {
     expect(lod.getActivePatchCount()).toBeGreaterThan(6);
     expect(lod.getCulledDamagedPatchCount()).toBeGreaterThan(0);
 
-    // Inspect active patches for depth=10 near camera and crack-dissolve uniforms on cracked patches
+    // Inspect active patches for depth=10 near camera and positive dispKm uplift on face 0 (+X)
+    lod.group.updateMatrixWorld(true);
     const patchMeshes: THREE.Mesh[] = [];
     lod.group.traverse((obj) => {
       if (obj instanceof THREE.Mesh && obj.visible) {
@@ -551,7 +656,7 @@ describe('CubeSphereLod - AC-16', () => {
 
     const recordedDepths: number[] = [];
     let minPatchSpanKm = Infinity;
-    let maxCrackOrDissolveUniform = 0;
+    let observedUpliftedFace0Patch = false;
 
     for (const m of patchMeshes) {
       const ud = m.userData as { depth?: unknown; lodDepth?: unknown };
@@ -571,12 +676,9 @@ describe('CubeSphereLod - AC-16', () => {
         }
       }
 
-      if (m.material instanceof THREE.ShaderMaterial) {
-        for (const [key, uniform] of Object.entries(m.material.uniforms)) {
-          if (/dissolve|crack|fracture|damage/i.test(key) && typeof uniform.value === 'number') {
-            maxCrackOrDissolveUniform = Math.max(maxCrackOrDissolveUniform, uniform.value);
-          }
-        }
+      const stats = sampleMeshWorldStats(m, cam.worldPositionKm, livingComKm);
+      if (stats && stats.meanDirX > 0.85 && stats.meanR > livingRadiusKm + 1.0 && stats.meanR < livingRadiusKm + 10.0) {
+        observedUpliftedFace0Patch = true;
       }
     }
 
@@ -584,9 +686,9 @@ describe('CubeSphereLod - AC-16', () => {
       expect(Math.max(...recordedDepths)).toBe(10);
     }
     expect(minPatchSpanKm).toBeLessThan(25); // depth-10 ~8-12 km patch vs <=8 >=35 km
-    expect(maxCrackOrDissolveUniform).toBeGreaterThanOrEqual(0.1);
+    expect(observedUpliftedFace0Patch).toBe(true);
 
-    // Also focus camera directly over cracked face 1 (-X) at 50 km altitude
+    // Focus camera directly over cracked face 1 (-X, D = 0.70) and verify crack-dissolve state without culling
     cam.setMode('SurfaceLock', { face: 1, u: 0.5, v: 0.5 });
     for (let i = 0; i < 40; i++) {
       cam.update(0.1, livingComKm, livingRadiusKm, 0, (f, u, v) =>
@@ -596,7 +698,7 @@ describe('CubeSphereLod - AC-16', () => {
     cam.camera.updateProjectionMatrix();
     cam.camera.updateMatrixWorld();
 
-    for (let frame = 0; frame < 10; frame++) {
+    for (let frame = 0; frame < 15; frame++) {
       lod.update(
         cam,
         livingComKm,
@@ -608,6 +710,19 @@ describe('CubeSphereLod - AC-16', () => {
     }
     expect(lod.getActivePatchCount()).toBeGreaterThan(0);
     expect(lod.getCulledDamagedPatchCount()).toBeGreaterThan(0);
+
+    lod.group.updateMatrixWorld(true);
+    const face1ActiveMeshes: THREE.Mesh[] = [];
+    lod.group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.visible) {
+        const stats = sampleMeshWorldStats(obj, cam.worldPositionKm, livingComKm);
+        if (stats && stats.meanDirX < 0) {
+          face1ActiveMeshes.push(obj);
+        }
+      }
+    });
+    expect(face1ActiveMeshes.length).toBeGreaterThan(0);
+    expect(face1ActiveMeshes.some(hasCrackDissolveEvidence)).toBe(true);
 
     // Fallback with tracers.count === 0 (uses spinAngleRad + livingComKm + livingRadiusKm)
     const emptyTracers = makeTracerPool(0, 0);
@@ -621,6 +736,27 @@ describe('CubeSphereLod - AC-16', () => {
     );
     expect(lod.getActivePatchCount()).toBeGreaterThan(0);
     expect(lod.getCulledDamagedPatchCount()).toBe(0);
+
+    lod.group.updateMatrixWorld(true);
+    let fallbackRadiusCount = 0;
+    let fallbackMinR = Infinity;
+    let fallbackMaxR = -Infinity;
+    let fallbackSumR = 0;
+    lod.group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.visible) {
+        const stats = sampleMeshWorldStats(obj, cam.worldPositionKm, livingComKm);
+        if (stats) {
+          fallbackMinR = Math.min(fallbackMinR, stats.minR);
+          fallbackMaxR = Math.max(fallbackMaxR, stats.maxR);
+          fallbackSumR += stats.meanR * stats.count;
+          fallbackRadiusCount += stats.count;
+        }
+      }
+    });
+    expect(fallbackRadiusCount).toBeGreaterThan(0);
+    expect(fallbackMinR).toBeGreaterThan(livingRadiusKm - 20);
+    expect(fallbackMaxR).toBeLessThan(livingRadiusKm + 20);
+    expect(Math.abs(fallbackSumR / fallbackRadiusCount - livingRadiusKm)).toBeLessThan(10);
 
     lod.dispose();
   });
