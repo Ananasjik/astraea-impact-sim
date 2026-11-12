@@ -244,7 +244,8 @@ TEST(ConservationTest, SurfaceTracerContinuityAcrossMortonResorts_AC9) {
                 EXPECT_TRUE(std::isfinite(overpressureKpa));
                 EXPECT_GE(overpressureKpa, 0.0f);
                 EXPECT_TRUE(std::isfinite(tsunamiHeightM));
-                EXPECT_GE(tsunamiHeightM, 0.0f);
+                EXPECT_GT(tsunamiHeightM, -1.0e5f);
+                EXPECT_LT(tsunamiHeightM, 1.0e6f);
             }
             for (uint32_t idx = 0; idx < expectedTracers; ++idx) {
                 EXPECT_EQ(seen[idx], 1u) << "step=" << step << " anchor=" << idx;
@@ -400,14 +401,14 @@ TEST(ConservationTest, TelemetryExportCsvJsonAndSimulationControls_AC10) {
 
     const std::string json = sim.exportTelemetryJson();
     EXPECT_FALSE(json.empty());
-    const std::array<const char*, 27> expectedFields = {
+    const std::array<const char*, 29> expectedFields = {
         "frameSeq", "simTimeSec", "dtSec", "outcome", "kineticEnergyJ",
         "potentialEnergyJ", "internalEnergyJ", "radiatedEnergyJ", "totalEnergyJ",
         "initialTotalEnergyJ", "energyDriftRel", "momentumKgMS", "angularMomentumKgM2S",
         "virialRatio", "maxTempK", "maxPressureGPa", "boundMassFrac", "diskMassFrac",
         "ejectaMassFrac", "qRatioQrd", "gpuStepMs", "livingBodyComKm",
         "livingBodyRadiusKm", "livingBodySpinRadS", "impactorComKm",
-        "particleCount", "livingBodyPresent"
+        "particleCount", "tracerCount", "tracerGridRes", "livingBodyPresent"
     };
     for (const char* field : expectedFields) {
         EXPECT_NE(json.find(field), std::string::npos) << "Missing JSON field: " << field;

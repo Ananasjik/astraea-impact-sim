@@ -196,10 +196,12 @@ TEST(EosTest, AllMaterialsRegimesAndDamagedTension_AC1) {
         const auto& p = eos::getParams(mat);
         const double rho0Psu = p.rho0KgM3 / units::RHO_UNIT_KGM3;
 
-        // 1) Compressed (eta = 1.5)
+        // 1) Compressed (eta = 1.5), including analytical P_c and D = 1.0 preservation
         {
             const float rhoPsu = static_cast<float>(1.5 * rho0Psu);
+            const double rhoSI = static_cast<double>(rhoPsu) * units::RHO_UNIT_KGM3;
             const double uColdPsu = eos::computeColdEnergyPsu(mat, rhoPsu);
+            const double uEosSI = uColdPsu * units::U_UNIT_JKG + p.cv_JKgK * 1000.0;
             const double uSi = uColdPsu * units::U_UNIT_JKG + p.cv_JKgK * (p.tRefK + 1000.0);
             const float uPsu = static_cast<float>(uSi / units::U_UNIT_JKG);
             const auto res = eos::evaluateEosPsu(mat, rhoPsu, uPsu, 0.0f);
@@ -209,6 +211,18 @@ TEST(EosTest, AllMaterialsRegimesAndDamagedTension_AC1) {
             EXPECT_GT(res.soundSpeedPsu, 0.0f);
             EXPECT_GE(res.tempK, 3.0f);
             EXPECT_GT(res.pressurePsu, 0.0f);
+
+            if (mat != MaterialId::HydrogenHelium) {
+                const double expectedPSi = analyticalTillotsonPcSI(p, rhoSI, uEosSI);
+                const double actualPSi = static_cast<double>(res.pressurePsu) * units::P_UNIT_PA;
+                EXPECT_NEAR(actualPSi, expectedPSi, 1e-4 * std::abs(expectedPSi) + 1e3);
+            }
+
+            // Damage D=1.0 must NOT attenuate positive compressive pressure
+            const auto resDamaged = eos::evaluateEosPsu(mat, rhoPsu, uPsu, 1.0f);
+            EXPECT_GT(resDamaged.pressurePsu, 0.0f);
+            EXPECT_NEAR(resDamaged.pressurePsu, res.pressurePsu,
+                        1e-5f * std::abs(res.pressurePsu) + 1e-12f);
         }
 
         // 2) Two-phase transition (Eiv <= u_EOS < Ecv, eta = 0.7)
@@ -364,12 +378,12 @@ TEST(EosTest, PhaseClassificationBranches) {
             MaterialId::Granite, rho0, static_cast<float>((g.cv_JKgK * 2200.0) / units::U_UNIT_JKG), 0.0f);
         EXPECT_EQ(molten.phaseId, static_cast<uint8_t>(PhaseId::Molten));
 
-        const auto vapor = eos::evaluateEosPsu(
+        const auto highEnergy = eos::evaluateEosPsu(
             MaterialId::Granite, 0.5f * rho0,
             static_cast<float>((g.cv_JKgK * g.tRefK + 1.2 * g.Ecv_JKg) / units::U_UNIT_JKG), 0.0f);
-        if (vapor.tempK <= 12000.0f) {
-            EXPECT_EQ(vapor.phaseId, static_cast<uint8_t>(PhaseId::Vapor));
-        }
+        EXPECT_GT(highEnergy.tempK, 12000.0f);
+        EXPECT_TRUE(highEnergy.phaseId == static_cast<uint8_t>(PhaseId::Plasma) ||
+                    highEnergy.phaseId == static_cast<uint8_t>(PhaseId::Vapor));
 
         const auto plasma = eos::evaluateEosPsu(
             MaterialId::Granite, rho0, static_cast<float>((g.cv_JKgK * 15000.0) / units::U_UNIT_JKG), 0.0f);
