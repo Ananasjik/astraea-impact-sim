@@ -60,7 +60,7 @@
 - **Выход:** `server/` (`http_ws_server.hpp/.cpp`, `sim_server_main.cpp`) + интеграционные тесты протокола (RFC 6455 handshake, упаковка бинарных кадров 100k+ частиц, JSON-управление пресетами/паузой/разрезом, экспорт телеметрии).
 - **Критерий завершения:** интеграционные тесты в `ctest` и проверка подключения клиента на Node/Python подтверждают стабильный бинарный поток кадров без потерь и падений.
 - **Покрывает:** `R-4`
-- **Статус:** `[ ]` — доказательство: —
+- **Статус:** `[x]` — доказательство: commits `merge(E3)` (`sim_server_lib`, `sim_server`, `astraea_server_tests`) на `main`; `cmake --build build -j12` (0 warnings), `ctest --test-dir build --output-on-failure`: `30/30 Passed` (100%, 32.80 s, включая `ServerProtocolTest` #25..#30: AC-11 RFC 6455 & 403 traversal, AC-12 PCLS+zlib+Velocity stream, AC-13 10 JSON RPC commands & error handling, `sim_server --help`).
 
 ### E4. Веб-клиент, логарифмический зум и 3D-рендер SPH + Cube-Sphere LOD — исполнитель: `developer` + `visual-designer` — зависит от: `E1`, `E3`
 - **Вход:** контракты бинарного клиента, камеры и LOD из `.agent-specs/planetary-collision-spec.md`, запущенный `sim_server`.
