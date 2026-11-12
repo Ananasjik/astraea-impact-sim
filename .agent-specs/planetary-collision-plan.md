@@ -67,7 +67,7 @@
 - **Выход:** `web/` (`package.json`, `vite.config.ts`, `tsconfig.json`, `src/net/`, `src/render/SphParticleRenderer.ts`, `src/render/AtmosphereShader.ts`, `src/render/CubeSphereLod.ts`, `src/render/OrbitalSurfaceCamera.ts`) + юнит-тесты `Vitest`.
 - **Критерий завершения:** `npm run typecheck`, `npm run build`, `npx vitest run` зелёные; в headless `Chromium 156` подтверждён рендер 100k+ частиц без WebGL/JS ошибок, работа разреза (cross-section), и плавный переход камеры от орбиты до участка коры с разрушением при $D \to 1$.
 - **Покрывает:** `R-5`
-- **Статус:** `[ ]` — доказательство: —
+- **Статус:** `[x]` — доказательство: commit `1a03ab0` на `main`; `npm --prefix web run typecheck` (`tsc --noEmit` -> exit 0), `npm --prefix web run build` (`vite build` -> exit 0), `npm --prefix web run test` (`vitest run`: `2/2 files, 14/14 passed`, включая 100k+1536 `PCLS`+`zlib` roundtrip и живой WebSocket обмен с C++ `sim_server`, `OrbitalSurfaceCamera` < 1e-6 km, 6 `VisMode` + `glslangValidator` + `logdepthbuf_*`, `CubeSphereLod` depth 10 без хордового провисания и `D>=0.85` culling).
 
 ### E5. Процедурная биосфера (биомы, флора, фауна и физическое сопряжение) — исполнитель: `developer` + `visual-designer` — зависит от: `E4`
 - **Вход:** контракты биомов, L-флоры, фауны и физических воздействий из `.agent-specs/planetary-collision-spec.md`.
