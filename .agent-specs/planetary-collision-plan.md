@@ -53,7 +53,7 @@
 - **Выход:** `engine/` (`CMakeLists.txt`, `eos.hpp/.cu`, `planet_builder.hpp/.cpp`, `sph_gravity.cu`, `simulation.hpp/.cpp`, `headless_main.cpp`) + независимый набор тестов `tests/cpp/` (`GTest`).
 - **Критерий завершения:** `cmake -B build && cmake --build build && ctest --test-dir build --output-on-failure` проходит на 100%; проверены: (1) устойчивость гидростатического равновесия всех 5 типов планет, (2) сохранение энергии $|\Delta E / E_0| < 1\%$ и импульсов на тестовых прогонах, (3) ударный нагрев и сжатие по Tillotson EOS, (4) производительность $\ge 100\,000$ частиц на RTX 4050.
 - **Покрывает:** `R-2`, `R-3`
-- **Статус:** `[ ]` — доказательство: —
+- **Статус:** `[x]` — доказательство: commit `6bd6c85` на `main`; `cmake --build build -j12` (0 warnings), `ctest --test-dir build --output-on-failure`: `24/24 Passed` (100%, 29.69 s, AC-1..AC-10, AC-12, AC-21); `sim_headless --preset LivingGaiaAsteroidCataclysm --particles 100000 --steps 40 --verify-conservation`: `medianGpuStepMs=18.3088 ms <= 33.3 ms`, `energyDriftRel=9.45e-6`, `dPRel=2.81e-6`, `dLRel=1.69e-4`.
 
 ### E3. Сервер HTTP + Binary WebSocket на C++20 — исполнитель: `developer` (`argon` / `sonnet`) — зависит от: `E1`, `E2`
 - **Вход:** контракты протокола из `.agent-specs/planetary-collision-spec.md` и библиотека движка из `E2`.
