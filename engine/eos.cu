@@ -356,17 +356,15 @@ ASTRAEA_HD EosEvalResult evaluateEosPsu(MaterialId mat, float rhoPsuIn, float uP
     bool damagedTension = false;
 
     if (eta >= 1.0 || uEos < Eiv) {
-        const double effDmg = (p.tMelt0K > 0.0 && tempK >= p.tMelt0K) ? 1.0 : damage;
         computeTillotsonCompressedPsu(
-            p, rho, rho0Psu, eta, mu, uEos, effDmg, pressure, dPDrho, dPDu, damagedTension);
+            p, rho, rho0Psu, eta, mu, uEos, damage, pressure, dPDrho, dPDu, damagedTension);
     } else if (uEos >= Ecv) {
         computeTillotsonExpandedPsu(p, rho, rho0Psu, eta, mu, uEos, pressure, dPDrho, dPDu);
     } else {
         double pc = 0.0, dPcDrho = 0.0, dPcDu = 0.0;
         double pe = 0.0, dPeDrho = 0.0, dPeDu = 0.0;
-        const double effDmg = (p.tMelt0K > 0.0 && tempK >= p.tMelt0K) ? 1.0 : damage;
         computeTillotsonCompressedPsu(
-            p, rho, rho0Psu, eta, mu, uEos, effDmg, pc, dPcDrho, dPcDu, damagedTension);
+            p, rho, rho0Psu, eta, mu, uEos, damage, pc, dPcDrho, dPcDu, damagedTension);
         computeTillotsonExpandedPsu(p, rho, rho0Psu, eta, mu, uEos, pe, dPeDrho, dPeDu);
 
         const double denom = maxD(1.0e-30, Ecv - Eiv);

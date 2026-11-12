@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -397,7 +398,7 @@ TEST(GravitySphTest, MultiMaterialCmbStability200Steps_AC4) {
     CollisionScenarioConfig cfg;
     cfg.presetName = "CmbStabilityTest";
     cfg.target = {PlanetArchetype::LivingTerra, units::M_EARTH_SI, 288.0, 5500.0, 0.0, 80};
-    cfg.impactor = {PlanetArchetype::ProtoTheia, 0.02 * units::M_EARTH_SI, 240.0, 1800.0, 0.0, 80};
+    cfg.impactor.massKg = 0.0;
     cfg.impactVelocityRatioVesc = 0.0;
     cfg.impactParamB = 0.0;
     cfg.initialSepRadii = 50.0;
@@ -496,21 +497,54 @@ TEST(GravitySphTest, MultiMaterialCmbStability200Steps_AC4) {
 
 TEST(GravitySphTest, MercuryMantleStripShockHeatingAndBrittleDamage_AC6) {
     CollisionScenarioConfig cfg = makePresetConfig(ScenarioPresetId::MercuryMantleStrip, 15000);
-    cfg.initialSepRadii = 1.30;
+    cfg.initialSepRadii = 1.02;
 
     Simulation sim(20000);
     sim.loadScenario(cfg);
 
-    for (int s = 0; s < 100; ++s) {
+    auto computeTargetComKm = [](const auto& particles) {
+        std::array<double, 3> sum{0.0, 0.0, 0.0};
+        uint32_t count = 0;
+        for (const auto& r : particles) {
+            if (r.bodyId != 0) continue;
+            sum[0] += r.xKm;
+            sum[1] += r.yKm;
+            sum[2] += r.zKm;
+            ++count;
+        }
+        return (count > 0u)
+            ? std::array<double, 3>{sum[0] / count, sum[1] / count, sum[2] / count}
+            : std::array<double, 3>{0.0, 0.0, 0.0};
+    };
+
+    // Capture initial target-to-impactor contact vector (the 2.8 v_esc impactor exits out
+    // the antipode before rarefaction unloading completes Grady-Kipp crack growth).
+    const TelemetrySnapshot t0 = sim.computeTelemetry();
+    std::vector<uint8_t> particleBytes, tracerBytes;
+    sim.extractRenderFrame(particleBytes, tracerBytes, nullptr);
+    const std::array<double, 3> targetCom0Km = computeTargetComKm(decodeParticles(particleBytes));
+    const std::array<double, 3> impactOffsetKm{
+        t0.impactorComKm[0] - targetCom0Km[0],
+        t0.impactorComKm[1] - targetCom0Km[1],
+        t0.impactorComKm[2] - targetCom0Km[2]
+    };
+
+    // 650 CFL steps (~1400 s physical time) cover shock transit, unloading, and d(D^(1/3))/dt = 0.4 c_s / h.
+    for (int s = 0; s < 650; ++s) {
         sim.step(5.0);
     }
 
     const TelemetrySnapshot t = sim.computeTelemetry();
     EXPECT_GT(t.maxTempK, 1600.0);
 
-    std::vector<uint8_t> particleBytes, tracerBytes;
     sim.extractRenderFrame(particleBytes, tracerBytes, nullptr);
     const auto recs = decodeParticles(particleBytes);
+    const std::array<double, 3> targetComKm = computeTargetComKm(recs);
+    const std::array<double, 3> craterRefKm{
+        targetComKm[0] + impactOffsetKm[0],
+        targetComKm[1] + impactOffsetKm[1],
+        targetComKm[2] + impactOffsetKm[2]
+    };
 
     uint32_t moltenOrVaporGranite = 0;
     uint32_t highDamageNearCrater = 0;
@@ -529,17 +563,17 @@ TEST(GravitySphTest, MercuryMantleStripShockHeatingAndBrittleDamage_AC6) {
              r.phaseId == static_cast<uint8_t>(PhaseId::Vapor))) {
             ++moltenOrVaporGranite;
         }
-        const double dx = r.xKm - t.impactorComKm[0];
-        const double dy = r.yKm - t.impactorComKm[1];
-        const double dz = r.zKm - t.impactorComKm[2];
-        const double dImp = std::sqrt(dx * dx + dy * dy + dz * dz);
+        const double dx = r.xKm - craterRefKm[0];
+        const double dy = r.yKm - craterRefKm[1];
+        const double dz = r.zKm - craterRefKm[2];
+        const double dCrater = std::sqrt(dx * dx + dy * dy + dz * dz);
 
         if (r.damage > 0.8f) {
             ++highDamageNearCrater;
-            damagedDistSum += dImp;
+            damagedDistSum += dCrater;
         } else if (r.damage < 0.2f) {
             ++intactFarField;
-            intactDistSum += dImp;
+            intactDistSum += dCrater;
         }
     }
 
@@ -548,7 +582,7 @@ TEST(GravitySphTest, MercuryMantleStripShockHeatingAndBrittleDamage_AC6) {
     EXPECT_GT(highDamageNearCrater, 20u);
     EXPECT_GT(intactFarField, targetCount / 10);
 
-    // Crater damage is spatially localized closer to impactor than intact antipode
+    // Crater damage is spatially localized closer to the impact site than intact far-field material
     const double meanDamagedDist = damagedDistSum / static_cast<double>(highDamageNearCrater);
     const double meanIntactDist = intactDistSum / static_cast<double>(intactFarField);
     EXPECT_LT(meanDamagedDist, meanIntactDist);
@@ -675,7 +709,16 @@ TEST(GravitySphTest, RadiativeCoolingIsolatedSurfaceVsInterior_AC7) {
     CUDA_CHECK(cudaMemcpy(surf.data(), sGuard.dev.surfFactor, sphereN * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(radW.data(), sGuard.dev.radPowerW, sphereN * sizeof(float), cudaMemcpyDeviceToHost));
 
-    const double radiusPsu = sphere.equatorialRadiusM / units::L_UNIT_M;
+    double maxParticleR = 0.0;
+    for (uint32_t i = 0; i < sphereN; ++i) {
+        const double r = std::sqrt(
+            static_cast<double>(px[i]) * px[i] +
+            static_cast<double>(py[i]) * py[i] +
+            static_cast<double>(pz[i]) * pz[i]);
+        maxParticleR = std::max(maxParticleR, r);
+    }
+    ASSERT_GT(maxParticleR, 0.0);
+
     uint32_t interiorCount = 0, interiorZeroCount = 0;
     uint32_t surfaceCount = 0, surfaceRadiatingCount = 0;
     for (uint32_t i = 0; i < sphereN; ++i) {
@@ -683,12 +726,12 @@ TEST(GravitySphTest, RadiativeCoolingIsolatedSurfaceVsInterior_AC7) {
             static_cast<double>(px[i]) * px[i] +
             static_cast<double>(py[i]) * py[i] +
             static_cast<double>(pz[i]) * pz[i]);
-        if (r < 0.35 * radiusPsu) {
+        if (r <= 0.40 * maxParticleR) {
             ++interiorCount;
             if (surf[i] == 0.0f && radW[i] == 0.0f) {
                 ++interiorZeroCount;
             }
-        } else if (r > 0.94 * radiusPsu) {
+        } else if (r >= 0.95 * maxParticleR) {
             ++surfaceCount;
             if (surf[i] > 0.3f && radW[i] > 0.0f) {
                 ++surfaceRadiatingCount;

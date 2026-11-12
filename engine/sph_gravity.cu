@@ -962,6 +962,12 @@ __global__ void gravityBarnesHutKernel(
 
 // ---------- SPH Pass 2: Pressure, delta-SPH, AV, Strength, Damage, Radiative Cooling ----------
 
+__device__ __forceinline__ float effectiveSphPressure(float pRaw, uint8_t phaseId) {
+    // Non-solid phases (Molten, Vapor, Plasma, LiquidWater, Gas) cannot sustain
+    // unphysical negative Tillotson tension in SPH hydro forces or P dV work.
+    return (phaseId != static_cast<uint8_t>(PhaseId::Solid)) ? fmaxf(pRaw, 0.0f) : pRaw;
+}
+
 template <bool UsePacked>
 __global__ void sphPass2Kernel(
     ParticleBuffersDevice p,
@@ -1001,7 +1007,7 @@ __global__ void sphPass2Kernel(
         Hi  = 2.0f * hi;
         rhoI = fmaxf(__ldg(&p.rho[i]), 1.0e-9f);
         invRhoI2 = 1.0f / (rhoI * rhoI);
-        pI = __ldg(&p.pressure[i]);
+        pI = effectiveSphPressure(__ldg(&p.pressure[i]), __ldg(&p.phaseId[i]));
         csI = fmaxf(__ldg(&p.soundSpeed[i]), 0.05f);
         tempI = __ldg(&p.tempK[i]);
         damI = __ldg(&p.damage[i]);
@@ -1067,7 +1073,7 @@ __global__ void sphPass2Kernel(
                     if (__any_sync(0xFFFFFFFFu, inRange)) {
                         const float mj   = __ldg(&p.mass[j]);
                         const float rhoJ = fmaxf(__ldg(&p.rho[j]), 1.0e-9f);
-                        const float pJ   = __ldg(&p.pressure[j]);
+                        const float pJ   = effectiveSphPressure(__ldg(&p.pressure[j]), __ldg(&p.phaseId[j]));
                         const float csJ  = fmaxf(__ldg(&p.soundSpeed[j]), 0.05f);
                         const float vxj  = __ldg(&p.velX[j]);
                         const float vyj  = __ldg(&p.velY[j]);

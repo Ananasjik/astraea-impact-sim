@@ -561,29 +561,44 @@ BuiltPlanetHost PlanetBuilder::buildPlanet(
         shellMassBounds.push_back(mStartKg);
         double currM = mStartKg;
         double currR = sIn.rM;
-        while (currM < mEndKg) {
-            const RadialProfileSample sCurr = interpolateProfileAtMass(host.radialProfile, currM);
-            const double spacingM = std::cbrt(nominalParticleMassKg / std::max(sCurr.rhoKgM3, 1.0e-3));
-            const double nextR = currR + spacingM;
-            if (nextR >= sOut.rM - 0.35 * spacingM) {
-                shellMassBounds.push_back(mEndKg);
-                break;
+        if (k == 0 && nk >= 2 && sOut.rM > 0.0) {
+            // Place one central particle at r = 0 to avoid an under-dense core cavity.
+            const double centerM = std::min(mStartKg + particleMassKg, mEndKg);
+            const double rCenter = std::cbrt((3.0 * centerM) / (4.0 * kPi * std::max(sIn.rhoKgM3, 1.0e-3)));
+            if (centerM < mEndKg && rCenter < sOut.rM) {
+                shellMassBounds.push_back(centerM);
+                currM = centerM;
+                currR = rCenter;
             }
-            // Find enclosed mass at nextR by linear interpolation on profile
+        }
+        auto massAtRadius = [&](double targetR) {
             auto it = std::lower_bound(
                 host.radialProfile.begin(),
                 host.radialProfile.end(),
-                nextR,
+                targetR,
                 [](const RadialProfileSample& s, double r) { return s.rM < r; });
-            double nextM = mEndKg;
+            double mVal = mEndKg;
             if (it != host.radialProfile.end() && it != host.radialProfile.begin()) {
                 const auto& hi = *it;
                 const auto& lo = *(it - 1);
                 const double dr = hi.rM - lo.rM;
-                const double t = (dr > 1.0e-30) ? std::clamp((nextR - lo.rM) / dr, 0.0, 1.0) : 0.0;
-                nextM = lo.enclosedMassKg + t * (hi.enclosedMassKg - lo.enclosedMassKg);
+                const double t = (dr > 1.0e-30) ? std::clamp((targetR - lo.rM) / dr, 0.0, 1.0) : 0.0;
+                mVal = lo.enclosedMassKg + t * (hi.enclosedMassKg - lo.enclosedMassKg);
             }
-            nextM = std::clamp(nextM, currM + 1.0e-9 * layerTotalMassKg, mEndKg);
+            return std::clamp(mVal, currM + 1.0e-9 * layerTotalMassKg, mEndKg);
+        };
+        while (currM < mEndKg) {
+            const RadialProfileSample sCurr = interpolateProfileAtMass(host.radialProfile, currM);
+            const double spacingM = std::cbrt(nominalParticleMassKg / std::max(sCurr.rhoKgM3, 1.0e-3));
+            // Use finer radial shells within 3.5 * spacingM of r = 0 so discrete shell midpoints
+            // populate the full SPH smoothing sphere without a center Shepard-norm deficit.
+            const double stepR = (k == 0 && nk >= 64 && currR < 3.5 * spacingM) ? (0.62 * spacingM) : spacingM;
+            const double nextR = currR + stepR;
+            if (nextR >= sOut.rM - 0.35 * stepR) {
+                shellMassBounds.push_back(mEndKg);
+                break;
+            }
+            const double nextM = massAtRadius(nextR);
             shellMassBounds.push_back(nextM);
             if (nextM >= mEndKg) {
                 break;
@@ -593,6 +608,28 @@ BuiltPlanetHost PlanetBuilder::buildPlanet(
         }
         if (shellMassBounds.size() < 2) {
             shellMassBounds.push_back(mEndKg);
+        }
+        // Prevent thick outer crusts (e.g. ProtoTheia Regolith) from collapsing into a single
+        // compressed 2D shell when layer thickness ~ spacingM and particle count is large.
+        if (shellMassBounds.size() == 2 && nk >= 128 && sOut.rM > sIn.rM) {
+            const double avgRho = std::max(0.5 * (sIn.rhoKgM3 + sOut.rhoKgM3), 1.0e-3);
+            const double layerSpacingM = std::cbrt(nominalParticleMassKg / avgRho);
+            if ((sOut.rM - sIn.rM) > 0.25 * layerSpacingM) {
+                constexpr size_t kSubShells = 3;
+                shellMassBounds.clear();
+                shellMassBounds.push_back(mStartKg);
+                currM = mStartKg;
+                for (size_t sub = 1; sub < kSubShells; ++sub) {
+                    const double fracR = static_cast<double>(sub) / static_cast<double>(kSubShells);
+                    const double targetR = sIn.rM + fracR * (sOut.rM - sIn.rM);
+                    const double nextM = massAtRadius(targetR);
+                    if (nextM > currM && nextM < mEndKg) {
+                        shellMassBounds.push_back(nextM);
+                        currM = nextM;
+                    }
+                }
+                shellMassBounds.push_back(mEndKg);
+            }
         }
 
         const size_t numShells = shellMassBounds.size() - 1;
