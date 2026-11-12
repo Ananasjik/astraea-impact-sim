@@ -1,4 +1,5 @@
 #include <atomic>
+#include <charconv>
 #include <csignal>
 #include <cstdint>
 #include <iostream>
@@ -41,6 +42,26 @@ void printUsage(const char* argv0) {
               << "  --help                Print this help message and exit\n";
 }
 
+uint64_t parseStrictUnsignedInRange(
+    const std::string& raw,
+    uint64_t minVal,
+    uint64_t maxVal,
+    const char* flagName) {
+    if (raw.empty()) {
+        throw std::invalid_argument(std::string("Empty value for ") + flagName);
+    }
+    uint64_t val = 0;
+    const char* begin = raw.data();
+    const char* end = raw.data() + raw.size();
+    const auto res = std::from_chars(begin, end, val);
+    if (res.ec != std::errc() || res.ptr != end || val < minVal || val > maxVal) {
+        throw std::invalid_argument(
+            std::string(flagName) + " must be an integer in [" +
+            std::to_string(minVal) + ", " + std::to_string(maxVal) + "]");
+    }
+    return val;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -62,11 +83,8 @@ int main(int argc, char** argv) {
                 printUsage(argv[0]);
                 return 0;
             } else if (arg == "--port") {
-                const long long v = std::stoll(requireValue(i, "--port"));
-                if (v < 0 || v > 65535) {
-                    throw std::invalid_argument("--port must be in [0, 65535]");
-                }
-                serverCfg.port = static_cast<uint16_t>(v);
+                serverCfg.port = static_cast<uint16_t>(
+                    parseStrictUnsignedInRange(requireValue(i, "--port"), 0, 65535, "--port"));
             } else if (arg == "--bind") {
                 serverCfg.bindHost = requireValue(i, "--bind");
                 if (serverCfg.bindHost.empty()) {
@@ -75,19 +93,13 @@ int main(int argc, char** argv) {
             } else if (arg == "--web-root") {
                 serverCfg.webRoot = requireValue(i, "--web-root");
             } else if (arg == "--particles") {
-                const long long v = std::stoll(requireValue(i, "--particles"));
-                if (v < 2 || v > 2000000) {
-                    throw std::invalid_argument("--particles must be in [2, 2000000]");
-                }
-                particles = static_cast<uint32_t>(v);
+                particles = static_cast<uint32_t>(
+                    parseStrictUnsignedInRange(requireValue(i, "--particles"), 2, 2000000, "--particles"));
             } else if (arg == "--preset") {
                 presetName = requireValue(i, "--preset");
             } else if (arg == "--target-fps") {
-                const long long v = std::stoll(requireValue(i, "--target-fps"));
-                if (v < 1 || v > 1000) {
-                    throw std::invalid_argument("--target-fps must be in [1, 1000]");
-                }
-                serverCfg.targetFps = static_cast<uint32_t>(v);
+                serverCfg.targetFps = static_cast<uint32_t>(
+                    parseStrictUnsignedInRange(requireValue(i, "--target-fps"), 1, 1000, "--target-fps"));
             } else if (arg == "--zlib") {
                 serverCfg.compressBinaryZlib = true;
             } else {

@@ -373,7 +373,8 @@ struct HttpWsServer::Impl {
     Impl(Simulation& s, const ServerConfig& c) : sim(s), cfg(c) {}
 
     ~Impl() {
-        cleanupSockets();
+        cleanupNetworkSockets();
+        closeWakePipe();
     }
 
     void closeWakePipe() {
@@ -394,7 +395,7 @@ struct HttpWsServer::Impl {
         }
     }
 
-    void cleanupSockets() {
+    void cleanupNetworkSockets() {
         for (ClientConn& c : clients) {
             decrementWsCount(c);
             if (c.fd >= 0) {
@@ -409,7 +410,6 @@ struct HttpWsServer::Impl {
             ::close(listenFd);
             listenFd = -1;
         }
-        closeWakePipe();
     }
 
     static void queueBytes(ClientConn& c, std::vector<uint8_t>&& bytes) {
@@ -1171,7 +1171,8 @@ HttpWsServer::HttpWsServer(Simulation& sim, const ServerConfig& cfg)
 
 HttpWsServer::~HttpWsServer() {
     stop();
-    impl_->cleanupSockets();
+    impl_->cleanupNetworkSockets();
+    impl_->closeWakePipe();
 }
 
 bool HttpWsServer::start() {
@@ -1179,13 +1180,20 @@ bool HttpWsServer::start() {
         return false;
     }
 
-    int wakeFds[2] = {-1, -1};
-    if (::pipe2(wakeFds, O_NONBLOCK | O_CLOEXEC) < 0) {
-        return false;
+    if (impl_->wakeReadFd < 0 || impl_->wakeWriteFd.load(std::memory_order_acquire) < 0) {
+        impl_->closeWakePipe();
+        int wakeFds[2] = {-1, -1};
+        if (::pipe2(wakeFds, O_NONBLOCK | O_CLOEXEC) < 0) {
+            return false;
+        }
+        impl_->wakeReadFd = wakeFds[0];
+        impl_->wakeWriteFd.store(wakeFds[1], std::memory_order_release);
+    } else {
+        uint8_t drain[64];
+        while (::read(impl_->wakeReadFd, drain, sizeof(drain)) > 0) {
+        }
     }
 
-    impl_->wakeReadFd = wakeFds[0];
-    impl_->wakeWriteFd.store(wakeFds[1], std::memory_order_release);
     impl_->stopRequested.store(false, std::memory_order_release);
 
     const std::string portStr = std::to_string(impl_->cfg.port);
@@ -1405,7 +1413,7 @@ void HttpWsServer::runEventLoop() {
         }
     }
 
-    impl_->cleanupSockets();
+    impl_->cleanupNetworkSockets();
     impl_->loopRunning.store(false, std::memory_order_release);
 }
 
