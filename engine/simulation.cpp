@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <iomanip>
 #include <limits>
@@ -1127,7 +1128,6 @@ struct Simulation::Impl {
         double remMass = std::max(m0, totalMassPsu * 0.5);
         double remRadius = std::max(targetRadiusPsu, 0.25);
 
-        std::vector<uint8_t> cls(n, 0); // 0 = bound planet, 1 = disk, 2 = ejecta
         for (int iter = 0; iter < 5; ++iter) {
             double nextM = 0.0;
             double nextX = 0.0, nextY = 0.0, nextZ = 0.0;
@@ -1204,7 +1204,6 @@ struct Simulation::Impl {
 
             if (eSpec >= 0.0) {
                 ejectaMass += m;
-                cls[i] = 2;
             } else {
                 if (host.bodyId[i] != 0u) {
                     impactorBoundMass += m;
@@ -1224,14 +1223,11 @@ struct Simulation::Impl {
                 }
                 if (isDisk) {
                     diskMass += m;
-                    cls[i] = 1;
                 } else {
                     boundPlanetMass += m;
-                    cls[i] = 0;
                 }
             }
         }
-        (void)cls;
 
         if (totalMassPsu > 0.0) {
             snap.boundMassFrac = boundPlanetMass / totalMassPsu;
@@ -1849,7 +1845,10 @@ void Simulation::extractRenderFrame(
             impl_->tracerGridRes,
             static_cast<float>(impl_->livingComPsu[0]),
             static_cast<float>(impl_->livingComPsu[1]),
-            static_cast<float>(impl_->livingComPsu[2]));
+            static_cast<float>(impl_->livingComPsu[2]),
+            static_cast<float>(impl_->sysComPsu[0]),
+            static_cast<float>(impl_->sysComPsu[1]),
+            static_cast<float>(impl_->sysComPsu[2]));
     } else {
         outTracerBytes.clear();
     }

@@ -79,7 +79,10 @@ void launchExtractTracers(
     uint32_t tracerGridRes,
     float livingComX,
     float livingComY,
-    float livingComZ);
+    float livingComZ,
+    float sysComX = 0.0f,
+    float sysComY = 0.0f,
+    float sysComZ = 0.0f);
 void launchPackRenderRecords(
     const ParticleBuffersDevice& p,
     uint8_t* d_particleRecords20B,

@@ -725,116 +725,143 @@ BuiltPlanetHost PlanetBuilder::buildPlanet(
             std::sort(candidates.begin(), candidates.end(), [&](uint32_t a, uint32_t b) {
                 return radii[a] > radii[b];
             });
-
-            // Restrict pool to outermost crust + ocean shell (at least 3x targetTracers for clean cell matching)
-            const float rMaxPsu = radii[candidates.front()];
-            const float drSurfPsu = host.h0[candidates.front()];
-            size_t poolSize = 0;
-            const size_t minPool = std::min(candidates.size(), static_cast<size_t>(targetTracers) * 3u);
-            for (; poolSize < candidates.size(); ++poolSize) {
-                const uint32_t pid = candidates[poolSize];
-                const bool inShell = (radii[pid] >= rMaxPsu - 1.8f * drSurfPsu) ||
-                                     (host.materialId[pid] == static_cast<uint8_t>(MaterialId::WaterIce));
-                if (!inShell && poolSize >= minPool) {
-                    break;
-                }
-            }
-            if (poolSize < targetTracers) {
-                poolSize = std::min(candidates.size(), static_cast<size_t>(targetTracers));
-            }
-            candidates.resize(poolSize);
-
-            std::vector<float> candNx(poolSize), candNy(poolSize), candNz(poolSize);
-            std::vector<uint8_t> candUsed(poolSize, 0);
-            std::vector<std::vector<uint32_t>> binCandidates(targetTracers);
-
-            for (size_t c = 0; c < poolSize; ++c) {
-                const uint32_t pid = candidates[c];
-                const float invR = 1.0f / radii[pid];
-                candNx[c] = host.posX[pid] * invR;
-                candNy[c] = host.posY[pid] * invR;
-                candNz[c] = host.posZ[pid] * invR;
-
-                uint32_t face = 0;
-                float u = 0.0f, v = 0.0f;
-                unitNormalToCubeFaceUv(candNx[c], candNy[c], candNz[c], face, u, v);
-                const uint32_t gx = std::min(tracerGridRes - 1u, static_cast<uint32_t>(u * static_cast<float>(tracerGridRes)));
-                const uint32_t gy = std::min(tracerGridRes - 1u, static_cast<uint32_t>(v * static_cast<float>(tracerGridRes)));
-                const uint32_t binIdx = face * (tracerGridRes * tracerGridRes) + gy * tracerGridRes + gx;
-                binCandidates[binIdx].push_back(static_cast<uint32_t>(c));
-            }
-
-            std::vector<float> binTargetX(targetTracers), binTargetY(targetTracers), binTargetZ(targetTracers);
-            std::vector<uint8_t> binFilled(targetTracers, 0);
-
-            auto assignParticleToBin = [&](uint32_t binIdx, size_t candIdx) {
-                const uint32_t pid = candidates[candIdx];
-                candUsed[candIdx] = 1;
-                binFilled[binIdx] = 1;
-                host.tracerIndex[pid] = static_cast<int32_t>(binIdx);
-                host.tracerRestRadiusPsu[pid] = radii[pid];
-                host.tracerRestNormalX[pid] = candNx[candIdx];
-                host.tracerRestNormalY[pid] = candNy[candIdx];
-                host.tracerRestNormalZ[pid] = candNz[candIdx];
-                host.tracerIsOcean[pid] =
-                    (host.materialId[pid] == static_cast<uint8_t>(MaterialId::WaterIce)) ? 1u : 0u;
-            };
-
-            // Pass A: pick best matching candidate inside each cube-sphere bin
-            for (uint32_t face = 0; face < 6; ++face) {
-                for (uint32_t gy = 0; gy < tracerGridRes; ++gy) {
-                    for (uint32_t gx = 0; gx < tracerGridRes; ++gx) {
-                        const uint32_t binIdx = face * (tracerGridRes * tracerGridRes) + gy * tracerGridRes + gx;
-                        const float u = (static_cast<float>(gx) + 0.5f) / static_cast<float>(tracerGridRes);
-                        const float v = (static_cast<float>(gy) + 0.5f) / static_cast<float>(tracerGridRes);
-                        cubeFaceUvToUnitNormal(face, u, v, binTargetX[binIdx], binTargetY[binIdx], binTargetZ[binIdx]);
-
-                        float bestDot = -2.0f;
-                        size_t bestCand = std::numeric_limits<size_t>::max();
-                        for (uint32_t c : binCandidates[binIdx]) {
-                            if (candUsed[c]) {
-                                continue;
-                            }
-                            const float dot = candNx[c] * binTargetX[binIdx] +
-                                              candNy[c] * binTargetY[binIdx] +
-                                              candNz[c] * binTargetZ[binIdx];
-                            if (dot > bestDot) {
-                                bestDot = dot;
-                                bestCand = c;
-                            }
-                        }
-                        if (bestCand != std::numeric_limits<size_t>::max()) {
-                            assignParticleToBin(binIdx, bestCand);
-                        }
+            // Fallback for very small N where a core particle sits at r <= 1e-6:
+            if (candidates.size() < targetTracers) {
+                for (uint32_t i = 0; i < nTotal && candidates.size() < targetTracers; ++i) {
+                    if (radii[i] <= 1.0e-6f) {
+                        candidates.push_back(i);
                     }
                 }
             }
 
-            // Pass B: fill any remaining empty bins with nearest unassigned surface candidate
-            for (uint32_t binIdx = 0; binIdx < targetTracers; ++binIdx) {
-                if (binFilled[binIdx]) {
-                    continue;
+            if (!candidates.empty()) {
+                // Restrict pool to outermost crust + ocean shell (at least 3x targetTracers for clean cell matching)
+                const float rMaxPsu = radii[candidates.front()];
+                const float drSurfPsu = host.h0[candidates.front()];
+                size_t poolSize = 0;
+                const size_t minPool = std::min(candidates.size(), static_cast<size_t>(targetTracers) * 3u);
+                for (; poolSize < candidates.size(); ++poolSize) {
+                    const uint32_t pid = candidates[poolSize];
+                    const bool inShell = (radii[pid] >= rMaxPsu - 1.8f * drSurfPsu) ||
+                                         (host.materialId[pid] == static_cast<uint8_t>(MaterialId::WaterIce));
+                    if (!inShell && poolSize >= minPool) {
+                        break;
+                    }
                 }
-                float bestDot = -2.0f;
-                size_t bestCand = std::numeric_limits<size_t>::max();
+                if (poolSize < targetTracers) {
+                    poolSize = std::min(candidates.size(), static_cast<size_t>(targetTracers));
+                }
+                candidates.resize(poolSize);
+
+                std::vector<float> candNx(poolSize), candNy(poolSize), candNz(poolSize);
+                std::vector<uint8_t> candUsed(poolSize, 0);
+                std::vector<std::vector<uint32_t>> binCandidates(targetTracers);
+
                 for (size_t c = 0; c < poolSize; ++c) {
-                    if (candUsed[c]) {
+                    const uint32_t pid = candidates[c];
+                    if (radii[pid] > 1.0e-6f) {
+                        const float invR = 1.0f / radii[pid];
+                        candNx[c] = host.posX[pid] * invR;
+                        candNy[c] = host.posY[pid] * invR;
+                        candNz[c] = host.posZ[pid] * invR;
+                    } else {
+                        candNx[c] = 0.0f;
+                        candNy[c] = 0.0f;
+                        candNz[c] = 1.0f;
+                    }
+
+                    uint32_t face = 0;
+                    float u = 0.0f, v = 0.0f;
+                    unitNormalToCubeFaceUv(candNx[c], candNy[c], candNz[c], face, u, v);
+                    const uint32_t gx = std::min(tracerGridRes - 1u, static_cast<uint32_t>(u * static_cast<float>(tracerGridRes)));
+                    const uint32_t gy = std::min(tracerGridRes - 1u, static_cast<uint32_t>(v * static_cast<float>(tracerGridRes)));
+                    const uint32_t binIdx = face * (tracerGridRes * tracerGridRes) + gy * tracerGridRes + gx;
+                    binCandidates[binIdx].push_back(static_cast<uint32_t>(c));
+                }
+
+                std::vector<float> binTargetX(targetTracers), binTargetY(targetTracers), binTargetZ(targetTracers);
+                std::vector<uint8_t> binFilled(targetTracers, 0);
+                uint32_t assignedCount = 0;
+
+                auto assignParticleToBin = [&](uint32_t binIdx, size_t candIdx) {
+                    const uint32_t pid = candidates[candIdx];
+                    candUsed[candIdx] = 1;
+                    binFilled[binIdx] = 1;
+                    ++assignedCount;
+                    host.tracerIndex[pid] = static_cast<int32_t>(binIdx);
+                    host.tracerRestRadiusPsu[pid] = radii[pid];
+                    host.tracerRestNormalX[pid] = candNx[candIdx];
+                    host.tracerRestNormalY[pid] = candNy[candIdx];
+                    host.tracerRestNormalZ[pid] = candNz[candIdx];
+                    host.tracerIsOcean[pid] =
+                        (host.materialId[pid] == static_cast<uint8_t>(MaterialId::WaterIce)) ? 1u : 0u;
+                };
+
+                // Pass A: pick best matching candidate inside each cube-sphere bin
+                for (uint32_t face = 0; face < 6; ++face) {
+                    for (uint32_t gy = 0; gy < tracerGridRes; ++gy) {
+                        for (uint32_t gx = 0; gx < tracerGridRes; ++gx) {
+                            const uint32_t binIdx = face * (tracerGridRes * tracerGridRes) + gy * tracerGridRes + gx;
+                            const float u = (static_cast<float>(gx) + 0.5f) / static_cast<float>(tracerGridRes);
+                            const float v = (static_cast<float>(gy) + 0.5f) / static_cast<float>(tracerGridRes);
+                            cubeFaceUvToUnitNormal(face, u, v, binTargetX[binIdx], binTargetY[binIdx], binTargetZ[binIdx]);
+
+                            float bestDot = -2.0f;
+                            size_t bestCand = std::numeric_limits<size_t>::max();
+                            for (uint32_t c : binCandidates[binIdx]) {
+                                if (candUsed[c]) {
+                                    continue;
+                                }
+                                const float dot = candNx[c] * binTargetX[binIdx] +
+                                                  candNy[c] * binTargetY[binIdx] +
+                                                  candNz[c] * binTargetZ[binIdx];
+                                if (dot > bestDot) {
+                                    bestDot = dot;
+                                    bestCand = c;
+                                }
+                            }
+                            if (bestCand != std::numeric_limits<size_t>::max()) {
+                                assignParticleToBin(binIdx, bestCand);
+                            }
+                        }
+                    }
+                }
+
+                // Pass B: fill any remaining empty bins with nearest unassigned surface candidate
+                for (uint32_t binIdx = 0; binIdx < targetTracers; ++binIdx) {
+                    if (binFilled[binIdx]) {
                         continue;
                     }
-                    const float dot = candNx[c] * binTargetX[binIdx] +
-                                      candNy[c] * binTargetY[binIdx] +
-                                      candNz[c] * binTargetZ[binIdx];
-                    if (dot > bestDot) {
-                        bestDot = dot;
-                        bestCand = c;
+                    float bestDot = -2.0f;
+                    size_t bestCand = std::numeric_limits<size_t>::max();
+                    for (size_t c = 0; c < poolSize; ++c) {
+                        if (candUsed[c]) {
+                            continue;
+                        }
+                        const float dot = candNx[c] * binTargetX[binIdx] +
+                                          candNy[c] * binTargetY[binIdx] +
+                                          candNz[c] * binTargetZ[binIdx];
+                        if (dot > bestDot) {
+                            bestDot = dot;
+                            bestCand = c;
+                        }
+                    }
+                    if (bestCand != std::numeric_limits<size_t>::max()) {
+                        assignParticleToBin(binIdx, bestCand);
                     }
                 }
-                if (bestCand != std::numeric_limits<size_t>::max()) {
-                    assignParticleToBin(binIdx, bestCand);
-                }
-            }
 
-            host.tracerCount = targetTracers;
+                // Compact indices if fewer than targetTracers candidates were available
+                if (assignedCount < targetTracers) {
+                    int32_t nextIdx = 0;
+                    for (uint32_t i = 0; i < nTotal; ++i) {
+                        if (host.tracerIndex[i] >= 0) {
+                            host.tracerIndex[i] = nextIdx++;
+                        }
+                    }
+                }
+                host.tracerCount = assignedCount;
+            }
         }
     }
 

@@ -19,7 +19,7 @@ namespace {
 constexpr int   kBlockSize      = 256;
 constexpr int   kWarpBlockSize  = 128;
 constexpr int   kWarpsPerBlock  = kWarpBlockSize / 32;
-constexpr int   kBvhStackSize   = 96;
+constexpr int   kBvhStackSize   = 192;
 constexpr float kPiF            = 3.14159265358979323846f;
 
 // Compile-time PSU reference specific internal energies (cv * 300 K) / U_UNIT_JKG
@@ -1584,7 +1584,10 @@ __global__ void extractTracersKernel(
     uint32_t tracerCount,
     float livingComX,
     float livingComY,
-    float livingComZ) {
+    float livingComZ,
+    float sysComX,
+    float sysComY,
+    float sysComZ) {
     const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) {
         return;
@@ -1636,9 +1639,9 @@ __global__ void extractTracersKernel(
     CrustTracerRecordPacked rec;
     rec.anchorIndex = static_cast<uint16_t>(tIdx);
     rec.flags = static_cast<uint16_t>((isOcean ? 1u : 0u) | (isDisrupted ? 2u : 0u));
-    rec.xKm = finiteOrZero(px * 1000.0f);
-    rec.yKm = finiteOrZero(py * 1000.0f);
-    rec.zKm = finiteOrZero(pz * 1000.0f);
+    rec.xKm = finiteOrZero((px - sysComX) * 1000.0f);
+    rec.yKm = finiteOrZero((py - sysComY) * 1000.0f);
+    rec.zKm = finiteOrZero((pz - sysComZ) * 1000.0f);
     rec.dispKm = finiteOrZero(dispKm);
     rec.normalDelta = finiteOrZero(normalDelta);
     rec.tempK = tempK;
@@ -2158,7 +2161,10 @@ void launchExtractTracers(
     uint32_t tracerGridRes,
     float livingComX,
     float livingComY,
-    float livingComZ) {
+    float livingComZ,
+    float sysComX,
+    float sysComY,
+    float sysComZ) {
     (void)tracerGridRes;
     if (tracerCount == 0u || d_tracerRecords40B == nullptr) {
         return;
@@ -2168,7 +2174,9 @@ void launchExtractTracers(
         return;
     }
     extractTracersKernel<<<gridForCount(p.count), kBlockSize>>>(
-        p, p.count, d_tracerRecords40B, tracerCount, livingComX, livingComY, livingComZ);
+        p, p.count, d_tracerRecords40B, tracerCount,
+        livingComX, livingComY, livingComZ,
+        sysComX, sysComY, sysComZ);
     ASTRAEA_CUDA_CHECK(cudaGetLastError());
 }
 
