@@ -652,10 +652,9 @@ std::optional<HttpResponse> httpGet(uint16_t port, const std::string& rawTarget,
                 deadline - std::chrono::steady_clock::now()).count());
             if (remMs <= 0) return std::nullopt;
             const ssize_t n = sock.recvSome(buf, remMs);
-            if (n <= 0) break;
+            if (n <= 0) return std::nullopt;
         }
-        const size_t avail = std::min(expectedLen, buf.size() - bodyStart);
-        resp.body.assign(reinterpret_cast<const char*>(buf.data() + bodyStart), avail);
+        resp.body.assign(reinterpret_cast<const char*>(buf.data() + bodyStart), expectedLen);
         return resp;
     }
 
@@ -959,10 +958,11 @@ void validateTelemetryDtoSchema(const JsonValue& t) {
                 outcome == "GrazeAndMerge" || outcome == "HitAndRun" ||
                 outcome == "CatastrophicDisruption") << "outcome=" << outcome;
 
-    const std::array<const char*, 13> scalarFields = {
+    const std::array<const char*, 17> scalarFields = {
         "kineticEnergyJ", "potentialEnergyJ", "internalEnergyJ", "radiatedEnergyJ",
         "totalEnergyJ", "energyDriftRel", "virialRatio", "maxTempK",
-        "maxPressureGPa", "boundMassFrac", "diskMassFrac", "ejectaMassFrac", "qRatioQrd"
+        "maxPressureGPa", "boundMassFrac", "diskMassFrac", "ejectaMassFrac", "qRatioQrd",
+        "gpuStepMs", "livingBodyRadiusKm", "livingBodySpinRadS", "tracerGridRes"
     };
     for (const char* f : scalarFields) {
         const JsonValue* v = t.find(f);
@@ -971,10 +971,6 @@ void validateTelemetryDtoSchema(const JsonValue& t) {
         EXPECT_TRUE(std::isfinite(v->numVal)) << "Field not finite: " << f;
     }
 
-    EXPECT_TRUE(t.find("gpuStepMs") && t.find("gpuStepMs")->isNumber());
-    EXPECT_TRUE(t.find("livingBodyRadiusKm") && t.find("livingBodyRadiusKm")->isNumber());
-    EXPECT_TRUE(t.find("livingBodySpinRadS") && t.find("livingBodySpinRadS")->isNumber());
-    EXPECT_TRUE(t.find("tracerGridRes") && t.find("tracerGridRes")->isNumber());
     EXPECT_TRUE(t.find("livingBodyPresent") && t.find("livingBodyPresent")->isBool());
 
     const std::array<const char*, 4> vec3Fields = {
@@ -1124,14 +1120,24 @@ int runProcessCapture(const std::string& exe, const std::vector<std::string>& ar
     ::close(pipefd[1]);
     outOutput.clear();
     char buf[4096];
-    ssize_t n = 0;
-    while ((n = ::read(pipefd[0], buf, sizeof(buf))) > 0) {
-        outOutput.append(buf, static_cast<size_t>(n));
+    while (true) {
+        const ssize_t n = ::read(pipefd[0], buf, sizeof(buf));
+        if (n > 0) {
+            outOutput.append(buf, static_cast<size_t>(n));
+        } else if (n == 0) {
+            break;
+        } else if (errno != EINTR) {
+            break;
+        }
     }
     ::close(pipefd[0]);
 
     int status = 0;
-    if (::waitpid(pid, &status, 0) < 0) return -1;
+    pid_t w = -1;
+    do {
+        w = ::waitpid(pid, &status, 0);
+    } while (w < 0 && errno == EINTR);
+    if (w < 0) return -1;
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 

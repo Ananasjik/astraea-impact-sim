@@ -56,6 +56,7 @@ if(TARGET sim_server_lib)
     )
 
     if(TARGET sim_server)
+        add_dependencies(astraea_server_tests sim_server)
         target_compile_definitions(astraea_server_tests PRIVATE
             ASTRAEA_SERVER_BIN="$<TARGET_FILE:sim_server>"
         )
