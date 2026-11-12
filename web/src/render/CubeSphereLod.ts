@@ -442,6 +442,7 @@ export class CubeSphereLod {
         face,
         cu,
         cv,
+        livingComKm,
         tracers,
         outPos,
         this.tmpTracerSample
@@ -645,6 +646,7 @@ export class CubeSphereLod {
     this.activePatchCount = activeCount;
     this.culledDamagedPatchCount = culledCount;
     this.maxActiveDepth = maxDepthSeen;
+    this.group.updateMatrixWorld(true);
   }
 
   dispose(): void {
@@ -745,15 +747,18 @@ export class CubeSphereLod {
     face: number,
     u: number,
     v: number,
+    livingComKm: [number, number, number],
     tracers: TracerBufferPool,
-    outPosKm: [number, number, number],
+    outPosKm: [number, number, number] | null,
     outField: TracerFieldSample
   ): void {
     const g = this.getGridRes(tracers);
     if (tracers.count === 0 || g <= 0) {
-      outPosKm[0] = 0.0;
-      outPosKm[1] = 0.0;
-      outPosKm[2] = 0.0;
+      if (outPosKm !== null) {
+        outPosKm[0] = 0.0;
+        outPosKm[1] = 0.0;
+        outPosKm[2] = 0.0;
+      }
       outField.dispKm = 0.0;
       outField.tempK = 288.0;
       outField.damage = 0.0;
@@ -784,9 +789,11 @@ export class CubeSphereLod {
     const wSum = w00 + w10 + w01 + w11;
 
     if (wSum <= 1.0e-9) {
-      outPosKm[0] = 0.0;
-      outPosKm[1] = 0.0;
-      outPosKm[2] = 0.0;
+      if (outPosKm !== null) {
+        outPosKm[0] = 0.0;
+        outPosKm[1] = 0.0;
+        outPosKm[2] = 0.0;
+      }
       outField.dispKm = 0.0;
       outField.tempK = 288.0;
       outField.damage = 0.0;
@@ -797,6 +804,9 @@ export class CubeSphereLod {
     }
 
     const invW = 1.0 / wSum;
+    const comX = livingComKm[0];
+    const comY = livingComKm[1];
+    const comZ = livingComKm[2];
     const tPos = tracers.positionsKm;
     const tDisp = tracers.dispKm;
     const tTemp = tracers.tempK;
@@ -805,9 +815,10 @@ export class CubeSphereLod {
     const tTsunami = tracers.tsunamiHeightM;
     const tFlags = tracers.flags;
 
-    let px = 0.0;
-    let py = 0.0;
-    let pz = 0.0;
+    let ox = 0.0;
+    let oy = 0.0;
+    let oz = 0.0;
+    let rSum = 0.0;
     let disp = 0.0;
     let temp = 0.0;
     let dam = 0.0;
@@ -816,10 +827,16 @@ export class CubeSphereLod {
     let oceanWeight = 0.0;
 
     if (w00 > 0.0) {
-      const p3 = s00 * 3;
-      px += w00 * tPos[p3];
-      py += w00 * tPos[p3 + 1];
-      pz += w00 * tPos[p3 + 2];
+      if (outPosKm !== null) {
+        const p3 = s00 * 3;
+        const dx = tPos[p3] - comX;
+        const dy = tPos[p3 + 1] - comY;
+        const dz = tPos[p3 + 2] - comZ;
+        ox += w00 * dx;
+        oy += w00 * dy;
+        oz += w00 * dz;
+        rSum += w00 * Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
       disp += w00 * tDisp[s00];
       temp += w00 * tTemp[s00];
       dam += w00 * tDam[s00];
@@ -830,10 +847,16 @@ export class CubeSphereLod {
       }
     }
     if (w10 > 0.0) {
-      const p3 = s10 * 3;
-      px += w10 * tPos[p3];
-      py += w10 * tPos[p3 + 1];
-      pz += w10 * tPos[p3 + 2];
+      if (outPosKm !== null) {
+        const p3 = s10 * 3;
+        const dx = tPos[p3] - comX;
+        const dy = tPos[p3 + 1] - comY;
+        const dz = tPos[p3 + 2] - comZ;
+        ox += w10 * dx;
+        oy += w10 * dy;
+        oz += w10 * dz;
+        rSum += w10 * Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
       disp += w10 * tDisp[s10];
       temp += w10 * tTemp[s10];
       dam += w10 * tDam[s10];
@@ -844,10 +867,16 @@ export class CubeSphereLod {
       }
     }
     if (w01 > 0.0) {
-      const p3 = s01 * 3;
-      px += w01 * tPos[p3];
-      py += w01 * tPos[p3 + 1];
-      pz += w01 * tPos[p3 + 2];
+      if (outPosKm !== null) {
+        const p3 = s01 * 3;
+        const dx = tPos[p3] - comX;
+        const dy = tPos[p3 + 1] - comY;
+        const dz = tPos[p3 + 2] - comZ;
+        ox += w01 * dx;
+        oy += w01 * dy;
+        oz += w01 * dz;
+        rSum += w01 * Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
       disp += w01 * tDisp[s01];
       temp += w01 * tTemp[s01];
       dam += w01 * tDam[s01];
@@ -858,10 +887,16 @@ export class CubeSphereLod {
       }
     }
     if (w11 > 0.0) {
-      const p3 = s11 * 3;
-      px += w11 * tPos[p3];
-      py += w11 * tPos[p3 + 1];
-      pz += w11 * tPos[p3 + 2];
+      if (outPosKm !== null) {
+        const p3 = s11 * 3;
+        const dx = tPos[p3] - comX;
+        const dy = tPos[p3 + 1] - comY;
+        const dz = tPos[p3 + 2] - comZ;
+        ox += w11 * dx;
+        oy += w11 * dy;
+        oz += w11 * dz;
+        rSum += w11 * Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
       disp += w11 * tDisp[s11];
       temp += w11 * tTemp[s11];
       dam += w11 * tDam[s11];
@@ -872,9 +907,20 @@ export class CubeSphereLod {
       }
     }
 
-    outPosKm[0] = px * invW;
-    outPosKm[1] = py * invW;
-    outPosKm[2] = pz * invW;
+    if (outPosKm !== null) {
+      // Preserve spherical/radial curvature between coarse grid tracers instead of sagging along chords
+      const oLen = Math.sqrt(ox * ox + oy * oy + oz * oz);
+      if (oLen > 1.0e-9) {
+        const scale = (rSum * invW) / oLen;
+        outPosKm[0] = comX + ox * scale;
+        outPosKm[1] = comY + oy * scale;
+        outPosKm[2] = comZ + oz * scale;
+      } else {
+        outPosKm[0] = comX + ox * invW;
+        outPosKm[1] = comY + oy * invW;
+        outPosKm[2] = comZ + oz * invW;
+      }
+    }
     outField.dispKm = disp * invW;
     outField.tempK = temp * invW;
     outField.damage = dam * invW;
@@ -894,8 +940,9 @@ export class CubeSphereLod {
       face,
       clamp(u, 0.0, 1.0),
       clamp(v, 0.0, 1.0),
+      [0.0, 0.0, 0.0],
       tracers,
-      this.tmpOutPos,
+      null,
       outField
     );
   }
@@ -937,6 +984,7 @@ export class CubeSphereLod {
         face,
         u,
         v,
+        livingComKm,
         tracers,
         outPos,
         this.tmpTracerSample
@@ -1317,6 +1365,7 @@ export class CubeSphereLod {
             node.face,
             u,
             v,
+            livingComKm,
             tracers,
             this.tmpOutPos,
             this.tmpTracerSample
@@ -1387,7 +1436,7 @@ export class CubeSphereLod {
       patchCenterY - cameraPosKm[1],
       patchCenterZ - cameraPosKm[2]
     );
-    slot.mesh.updateMatrixWorld();
+    slot.mesh.updateMatrix();
 
     const effectiveDamage = Math.max(centerDamage, 0.5 * (centerDamage + maxPatchDamage));
     let dissolveProgress = 0.0;

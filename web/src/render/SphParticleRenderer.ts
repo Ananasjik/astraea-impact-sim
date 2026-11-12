@@ -424,6 +424,7 @@ export class SphParticleRenderer {
     this.propAttr.needsUpdate = true;
     this.metaAttr.needsUpdate = true;
     this.geometry.setDrawRange(0, n);
+    this.mesh.updateMatrixWorld();
   }
 
   dispose(): void {

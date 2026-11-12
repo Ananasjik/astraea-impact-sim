@@ -72,7 +72,6 @@ export type ClientCommand =
   | { type: 'ping'; ts: number };
 
 export interface PresetLoadedDto {
-  type?: 'preset_loaded';
   preset: string;
   particleCount: number;
   tracerCount: number;
@@ -81,7 +80,6 @@ export interface PresetLoadedDto {
 }
 
 export interface ExportDataDto {
-  type?: 'export_data';
   format: 'csv' | 'json';
   filename: string;
   content: string;
@@ -335,14 +333,26 @@ export class SimClient {
         break;
       }
       case 'preset_loaded': {
-        const dto = parsed as PresetLoadedDto;
+        const raw = parsed as Partial<PresetLoadedDto>;
+        const dto: PresetLoadedDto = {
+          preset: String(raw.preset ?? ''),
+          particleCount: Number(raw.particleCount ?? 0),
+          tracerCount: Number(raw.tracerCount ?? 0),
+          tracerGridRes: Number(raw.tracerGridRes ?? 0),
+          livingBodyPresent: Boolean(raw.livingBodyPresent),
+        };
         for (const cb of this.presetLoadedListeners) {
           cb(dto);
         }
         break;
       }
       case 'export_data': {
-        const dto = parsed as ExportDataDto;
+        const raw = parsed as Partial<ExportDataDto>;
+        const dto: ExportDataDto = {
+          format: raw.format === 'json' ? 'json' : 'csv',
+          filename: String(raw.filename ?? ''),
+          content: String(raw.content ?? ''),
+        };
         for (const cb of this.exportDataListeners) {
           cb(dto);
         }
