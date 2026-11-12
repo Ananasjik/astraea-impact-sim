@@ -1,0 +1,127 @@
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #1a1a1a;
+    font-family: monospace;
+    color: #eee;
+}
+
+#game-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#ui-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Let clicks pass through to canvas by default */
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* UI Panels */
+#inventory-panel, #crafting-panel {
+    position: absolute;
+    background: rgba(30, 30, 30, 0.9);
+    border: 2px solid #555;
+    border-radius: 5px;
+    padding: 10px;
+    pointer-events: auto; /* Catch clicks on UI */
+}
+
+#inventory-panel {
+    top: 50px;
+    left: 20px;
+    width: 250px;
+}
+
+#crafting-panel {
+    top: 50px;
+    right: 20px;
+    width: 300px;
+}
+
+#hotbar {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(30, 30, 30, 0.9);
+    border: 2px solid #555;
+    border-radius: 5px;
+    padding: 5px;
+    display: flex;
+    gap: 5px;
+    pointer-events: auto;
+}
+
+.slot {
+    width: 40px;
+    height: 40px;
+    background: #333;
+    border: 1px solid #777;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    cursor: pointer;
+}
+
+.slot.selected {
+    border-color: #ffaa00;
+    box-shadow: 0 0 5px #ffaa00;
+}
+
+.slot span.count {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    font-size: 10px;
+    background: rgba(0,0,0,0.7);
+    padding: 1px 3px;
+    border-radius: 3px;
+}
+
+/* Health Bar */
+#health-bar-container {
+    position: absolute;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 300px;
+    height: 20px;
+    background: #333;
+    border: 2px solid #222;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+#health-bar {
+    width: 100%;
+    height: 100%;
+    background: #dd3333;
+    transition: width 0.2s;
+}
+
+/* Status Message */
+#status-message {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 18px;
+    color: #ffaa00;
+    text-shadow: 1px 1px 2px black;
+    pointer-events: none;
+    transition: opacity 0.5s;
+    opacity: 0;
+}

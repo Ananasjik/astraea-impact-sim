@@ -1,0 +1,24 @@
+# Build artifacts
+build/
+cmake-build-*/
+*.o
+*.obj
+*.a
+*.so
+*.exe
+
+# Web / Node
+node_modules/
+web/node_modules/
+web/dist/
+web/.vite/
+coverage/
+
+# Logs & temporary outputs
+*.log
+*.tmp
+*.csv
+!tests/**/*.csv
+.DS_Store
+
+# Keep .agent-specs/ and .agents/MEMORY.md versioned

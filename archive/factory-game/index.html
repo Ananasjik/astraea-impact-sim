@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser Factory Game</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="ui-layer">
+        <div id="hotbar"></div>
+        <div id="inventory-panel" class="hidden">
+            <h3>Inventory</h3>
+            <div id="inventory-grid"></div>
+        </div>
+        <div id="crafting-panel" class="hidden">
+            <h3>Crafting</h3>
+            <div id="crafting-grid"></div>
+        </div>
+        <div id="health-bar-container">
+            <div id="health-bar"></div>
+        </div>
+        <div id="status-message"></div>
+    </div>
+    
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Engine -->
+    <script src="src/engine/Input.js"></script>
+    <script src="src/engine/Camera.js"></script>
+    <script src="src/engine/Renderer.js"></script>
+    <script src="src/engine/Utils.js"></script>
+
+    <!-- Game Data & Mechanics -->
+    <script src="src/game/Items.js"></script>
+    <script src="src/game/Inventory.js"></script>
+    <script src="src/game/Crafting.js"></script>
+
+    <!-- Buildings -->
+    <script src="src/game/buildings/Building.js"></script>
+    <script src="src/game/buildings/Miner.js"></script>
+    <script src="src/game/buildings/Conveyor.js"></script>
+    <script src="src/game/buildings/Smelter.js"></script>
+    <script src="src/game/buildings/Turret.js"></script>
+    
+    <!-- Game Entities -->
+    <script src="src/game/Player.js"></script>
+    <script src="src/game/Enemies.js"></script>
+    <script src="src/game/World.js"></script>
+    
+    <!-- Main Loop -->
+    <script src="src/main.js"></script>
+</body>
+</html>
