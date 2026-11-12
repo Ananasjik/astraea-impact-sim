@@ -14,6 +14,7 @@ export const MAX_ALTITUDE_KM = 1.0e5; // 10^8 meters
 const MAX_ORBITAL_PITCH_RAD = Math.PI * 0.495;
 const MAX_SURFACE_TILT_RAD = Math.PI * 0.48;
 const WHEEL_LOG_SENSITIVITY = 0.0024;
+const MAX_WHEEL_DELTA_Y = 10_000.0;
 const ORBIT_SENSITIVITY_RAD = 0.005;
 
 function clamp(v: number, minVal: number, maxVal: number): number {
@@ -21,7 +22,13 @@ function clamp(v: number, minVal: number, maxVal: number): number {
 }
 
 export function clampAltitudeKm(altKm: number): number {
-  if (!Number.isFinite(altKm)) {
+  if (Number.isNaN(altKm)) {
+    return MIN_ALTITUDE_KM;
+  }
+  if (altKm === Number.POSITIVE_INFINITY) {
+    return MAX_ALTITUDE_KM;
+  }
+  if (altKm === Number.NEGATIVE_INFINITY) {
     return MIN_ALTITUDE_KM;
   }
   return clamp(altKm, MIN_ALTITUDE_KM, MAX_ALTITUDE_KM);
@@ -207,7 +214,8 @@ export class OrbitalSurfaceCamera {
       return;
     }
     this.smoothTargetAltitudeKm = null;
-    const factor = Math.exp(deltaY * WHEEL_LOG_SENSITIVITY);
+    const clampedDeltaY = clamp(deltaY, -MAX_WHEEL_DELTA_Y, MAX_WHEEL_DELTA_Y);
+    const factor = Math.exp(clampedDeltaY * WHEEL_LOG_SENSITIVITY);
     this.altitudeKm = clampAltitudeKm(this.altitudeKm * factor);
   }
 

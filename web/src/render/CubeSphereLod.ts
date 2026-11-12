@@ -77,6 +77,9 @@ const CRACK_DISSOLVE_MIN_DAMAGE = 0.55;
 const SHATTER_CULL_DAMAGE = 0.85;
 
 const LOD_VERTEX_SHADER = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+
 attribute vec3 aAlbedo;
 attribute float aDamage;
 attribute float aTempK;
@@ -112,10 +115,15 @@ void main() {
   }
 
   gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+
+  #include <logdepthbuf_vertex>
 }
 `;
 
 const LOD_FRAGMENT_SHADER = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+
 uniform vec3 uSunDir;
 uniform float uDissolveProgress;
 uniform float uCrackProgress;
@@ -198,6 +206,8 @@ vec2 voronoiCrack(vec2 x) {
 }
 
 void main() {
+  #include <logdepthbuf_fragment>
+
   vec3 n = normalize(vNormal);
   float ndotl = max(dot(n, uSunDir), 0.0);
   float wrapLight = 0.14 + 0.86 * smoothstep(-0.15, 0.95, dot(n, uSunDir));
@@ -398,6 +408,7 @@ export class CubeSphereLod {
     v: number,
     tracers: TracerBufferPool
   ): TracerFieldSample {
+    this.prepareTracerLookup(tracers);
     const out: TracerFieldSample = {
       dispKm: 0.0,
       tempK: 288.0,
@@ -666,15 +677,11 @@ export class CubeSphereLod {
     const totalBins = 6 * g * g;
     let direct = count === totalBins;
     if (direct) {
-      const checkStride = Math.max(1, Math.floor(count / 64));
-      for (let i = 0; i < count; i += checkStride) {
+      for (let i = 0; i < count; i++) {
         if (tracers.anchorIndex[i] !== i) {
           direct = false;
           break;
         }
-      }
-      if (direct && tracers.anchorIndex[count - 1] !== count - 1) {
-        direct = false;
       }
     }
 

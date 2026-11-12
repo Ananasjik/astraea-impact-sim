@@ -1,16 +1,24 @@
 import * as THREE from 'three';
 
 const ATMOSPHERE_VERTEX_SHADER = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+
 varying vec3 vWorldRelKm;
 
 void main() {
   vec4 worldRel = modelMatrix * vec4(position, 1.0);
   vWorldRelKm = worldRel.xyz;
   gl_Position = projectionMatrix * viewMatrix * worldRel;
+
+  #include <logdepthbuf_vertex>
 }
 `;
 
 const ATMOSPHERE_FRAGMENT_SHADER = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+
 uniform vec3 uPlanetCenterRelKm;
 uniform float uPlanetRadiusKm;
 uniform float uAtmosphereRadiusKm;
@@ -40,6 +48,8 @@ vec3 plumeBlackbody(float tempK) {
 }
 
 void main() {
+  #include <logdepthbuf_fragment>
+
   vec3 rd = normalize(vWorldRelKm);
   vec3 ro = vec3(0.0);
 
@@ -136,7 +146,7 @@ export class AtmosphereShader {
       side: THREE.BackSide,
       transparent: true,
       depthWrite: false,
-      depthTest: true,
+      depthTest: false,
       blending: THREE.NormalBlending,
       uniforms: {
         uPlanetCenterRelKm: { value: new THREE.Vector3(0.0, 0.0, 0.0) },

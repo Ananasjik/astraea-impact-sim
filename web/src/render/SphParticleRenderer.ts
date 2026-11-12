@@ -19,6 +19,9 @@ export const VIS_MODE_TO_INDEX: Record<VisMode, number> = {
 };
 
 const VERTEX_SHADER = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+
 attribute vec4 aProp; // [tempK, pressureGPa, damage01, radiusKm]
 attribute vec4 aMeta; // [materialId, phaseId, bodyId, speedKmS]
 
@@ -41,10 +44,15 @@ void main() {
     (uViewportHeight * projectionMatrix[1][1] * radiusKm * 1.4) /
     max(gl_Position.w, 1.0e-4);
   gl_PointSize = clamp(projDiameterPx, 1.5, 48.0);
+
+  #include <logdepthbuf_vertex>
 }
 `;
 
 const FRAGMENT_SHADER = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+
 // VisMode indices:
 // 0 = NaturalBlackbody
 // 1 = TemperatureK
@@ -155,6 +163,8 @@ vec3 viridisColormap(float x) {
 }
 
 void main() {
+  #include <logdepthbuf_fragment>
+
   if (uSliceEnabled > 0.5 && dot(vWorldPosKm - uSliceComKm, uSliceNormal) > uSliceOffsetKm) {
     discard;
   }

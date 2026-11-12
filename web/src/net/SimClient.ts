@@ -101,7 +101,7 @@ export type ConnectionState =
 
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const RECONNECT_MIN_DELAY_MS = 1_000;
-const RECONNECT_MAX_DELAY_MS = 10_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
 const MAX_QUEUED_COMMANDS = 256;
 const WS_CONNECTING = 0;
 const WS_OPEN = 1;
