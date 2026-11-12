@@ -39,14 +39,14 @@
 - **Выход:** файлы прежней игры перемещены в `archive/factory-game/`; создан `.gitignore`, инициализирован Git и сделан базовый коммит; создан `.agents/MEMORY.md` с верифицированными путями и флагами CUDA 13.4 / GTest / Node.
 - **Критерий завершения:** `git status` чистый, `archive/factory-game/index.html` существует, `.agents/MEMORY.md` содержит 4 канонические секции.
 - **Покрывает:** `R-1`
-- **Статус:** `[ ]` — доказательство: —
+- **Статус:** `[x]` — доказательство: commit `aa17787` на ветке `main`, `archive/factory-game/index.html`, `.agents/MEMORY.md` создан.
 
-### E1. Архитектурная спецификация — исполнитель: `architect` (`argon`) — зависит от: `E0`
+### E1. Архитектурная спецификация — исполнитель: `architect` (`self` / Gemini 4 Hydrogen XHigh) — зависит от: `E0`
 - **Вход:** требования `R-1..R-7`, проверенное окружение из `.agents/MEMORY.md`, ресурсы `architect/resources/custom-engine.md` и `architect/resources/web.md`.
-- **Выход:** `.agent-specs/planetary-collision-spec.md` — полный контракт (SoA-структуры C++/CUDA, точные таблицы параметров Tillotson EOS, уравнения самогравитации Barnes-Hut + SPH + damage, формат бинарного кадра WebSocket и JSON-команд, алгоритм привязки Cube-Sphere Quadtree LOD к трассерам SPH, геном флоры/фауны и физические пороги воздействия, критерии приёмки `AC-1..AC-N`).
+- **Выход:** `.agent-specs/planetary-collision-spec.md` — полный контракт (SoA-структуры C++/CUDA, точные таблицы параметров Tillotson EOS, уравнения самогравитации Barnes-Hut + SPH + damage, формат бинарного кадра WebSocket и JSON-команд, алгоритм привязки Cube-Sphere Quadtree LOD к трассерам SPH, геном флоры/фауны и физические пороги воздействия, критерии приёмки `AC-1..AC-22`).
 - **Критерий завершения:** спецификация прошла приёмку по чеклисту `architect` (отсутствуют `TBD`, все имена/сигнатуры зафиксированы, все `AC-n` проверяемы по входу/выходу).
 - **Покрывает:** `R-1..R-7`
-- **Статус:** `[ ]` — доказательство: —
+- **Статус:** `[x]` — доказательство: `.agent-specs/planetary-collision-spec.md` (1251+ строк, 22 `AC-n`, пройдена приёмка и термодинамический аудит Tillotson/EOS/LOD).
 
 ### E2. Физический движок C++20/CUDA и генератор планет — исполнитель: `developer` (`argon` в параллельных ветках + `ctest`) — зависит от: `E1`
 - **Вход:** `.agent-specs/planetary-collision-spec.md` (разделы по EOS, гидростатике, ядрам CUDA, интегратору и тестам).
