@@ -822,6 +822,7 @@ const FLORA_VERTEX_SHADER = /* glsl */ `
 
 attribute float aBranchWeight;
 attribute float aPartType;
+attribute vec3 aInstanceOrigin;
 
 uniform float uTimeSec;
 uniform float uPgaG;
@@ -849,18 +850,22 @@ void main() {
   vBranchWeight = aBranchWeight;
   vPartType = aPartType;
 
-  // Transform world-space blast direction into local meter frame via orthonormal transpose
+  // Transform world-space blast direction into local meter frame via scale-normalized basis transpose
   mat3 inst3 = mat3(instMat);
+  vec3 c0 = length(inst3[0]) > 1.0e-6 ? normalize(inst3[0]) : vec3(1.0, 0.0, 0.0);
+  vec3 c1 = length(inst3[1]) > 1.0e-6 ? normalize(inst3[1]) : vec3(0.0, 1.0, 0.0);
+  vec3 c2 = length(inst3[2]) > 1.0e-6 ? normalize(inst3[2]) : vec3(0.0, 0.0, 1.0);
+  mat3 rot3 = mat3(c0, c1, c2);
   float blastLen = length(uBlastDirLocal);
   vec3 normBlast = blastLen > 1.0e-5 ? (uBlastDirLocal / blastLen) : vec3(1.0, 0.0, 0.0);
-  vec3 localBlastRaw = transposeMat3(inst3) * normBlast;
+  vec3 localBlastRaw = transposeMat3(rot3) * normBlast;
   vec2 blastXZ = localBlastRaw.xz;
   float blastXZLen = length(blastXZ);
   vec3 localBlastDir = blastXZLen > 1.0e-5
     ? vec3(blastXZ.x / blastXZLen, 0.0, blastXZ.y / blastXZLen)
     : vec3(1.0, 0.0, 0.0);
 
-  float instSeed = dot(instMat[3].xyz, vec3(12.9898, 78.233, 37.719));
+  float instSeed = dot(fract(aInstanceOrigin * 1.73), vec3(12.9898, 78.233, 37.719));
 
   // Wind sway (height-weighted via aBranchWeight)
   float windPhase = uTimeSec * 1.85 + instSeed + position.y * 0.42;
@@ -1005,6 +1010,7 @@ interface SpeciesPool {
   species: FloraSpeciesId;
   mesh: THREE.InstancedMesh;
   geometry: THREE.BufferGeometry;
+  originAttr: THREE.InstancedBufferAttribute;
   capacity: number;
   activeCount: number;
 }
@@ -1057,6 +1063,10 @@ export class ProceduralFlora {
       const species = ALL_FLORA_SPECIES[i];
       const cap = baseCap + (i < remainder ? 1 : 0);
       const geometry = buildFloraSpeciesGeometry(species, biomeSystem.seed + i * 97);
+      const originArr = new Float32Array(cap * 3);
+      const originAttr = new THREE.InstancedBufferAttribute(originArr, 3);
+      originAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('aInstanceOrigin', originAttr);
       const mesh = new THREE.InstancedMesh(geometry, this.material, cap);
       mesh.name = `Flora_${species}`;
       mesh.frustumCulled = false;
@@ -1076,6 +1086,7 @@ export class ProceduralFlora {
         species,
         mesh,
         geometry,
+        originAttr,
         capacity: cap,
         activeCount: 0,
       });
@@ -1202,6 +1213,11 @@ export class ProceduralFlora {
       const slot = pool.activeCount;
       pool.mesh.setMatrixAt(slot, this.tmpMat);
       pool.mesh.setColorAt(slot, getSpeciesTint(species, rng));
+      const originArr = pool.originAttr.array as Float32Array;
+      const oIdx = slot * 3;
+      originArr[oIdx] = this.tmpNormal.x * surfaceRKm;
+      originArr[oIdx + 1] = this.tmpNormal.y * surfaceRKm;
+      originArr[oIdx + 2] = this.tmpNormal.z * surfaceRKm;
       pool.activeCount += 1;
       totalPlaced += 1;
     }
@@ -1209,6 +1225,7 @@ export class ProceduralFlora {
     for (const pool of this.pools.values()) {
       pool.mesh.count = pool.activeCount;
       pool.mesh.instanceMatrix.needsUpdate = true;
+      pool.originAttr.needsUpdate = true;
       if (pool.mesh.instanceColor !== null) {
         pool.mesh.instanceColor.needsUpdate = true;
       }

@@ -400,7 +400,10 @@ export class ImpactBiosphereCoupler {
     let hotZ = 0.0;
     let hotTempWeightedSum = 0.0;
     let hotCount = 0;
+    let maxExteriorTempK = 288.0;
     let vaporMoltenCount = 0;
+    const isApproachingFar =
+      telemetry.outcome === 'Approaching' && (!this.hasImpactor || sepKm > 1.35 * rKm);
 
     for (let i = 0; i < pCount; i++) {
       const i3 = i * 3;
@@ -412,16 +415,36 @@ export class ImpactBiosphereCoupler {
       } else {
         impactorParticles += 1;
       }
-      if (phaseId === 1 || phaseId === 2 || phaseId === 3) {
+
+      const px = particles.positionsKm[i3];
+      const py = particles.positionsKm[i3 + 1];
+      const pz = particles.positionsKm[i3 + 2];
+      const dxLiving = px - this.livingComKm[0];
+      const dyLiving = py - this.livingComKm[1];
+      const dzLiving = pz - this.livingComKm[2];
+      const rFromLivingKm = Math.sqrt(
+        dxLiving * dxLiving + dyLiving * dyLiving + dzLiving * dzLiving
+      );
+      const damage01 = particles.props[i4 + 2];
+
+      // Exclude intact planetary interiors (e.g., 5500 K LivingTerra core or approaching impactor core)
+      const isExteriorOrPlume =
+        phaseId === 2 ||
+        phaseId === 3 ||
+        (bodyId === 0
+          ? rFromLivingKm >= 0.88 * rKm
+          : !isApproachingFar || damage01 >= 0.15);
+
+      if (isExteriorOrPlume && (phaseId === 1 || phaseId === 2 || phaseId === 3)) {
         vaporMoltenCount += 1;
       }
 
       const tempK = particles.props[i4];
-      if (tempK > 700.0) {
+      if (isExteriorOrPlume && tempK > maxExteriorTempK) {
+        maxExteriorTempK = tempK;
+      }
+      if (isExteriorOrPlume && tempK > 700.0) {
         hotCount += 1;
-        const px = particles.positionsKm[i3];
-        const py = particles.positionsKm[i3 + 1];
-        const pz = particles.positionsKm[i3 + 2];
         const w = Math.pow(clamp((tempK - 600.0) / 1000.0, 0.1, 20.0), 1.5);
         hotWeightSum += w;
         hotX += px * w;
@@ -443,10 +466,13 @@ export class ImpactBiosphereCoupler {
       this.impactorMassRatio = 0.0;
     }
 
-    const maxTempK = Math.max(
-      Number.isFinite(telemetry.maxTempK) ? telemetry.maxTempK : 288.0,
-      tracerPeakTemp
-    );
+    const telemetryMaxTempK = Number.isFinite(telemetry.maxTempK)
+      ? telemetry.maxTempK
+      : 288.0;
+    const effectivePeakTempK =
+      pCount > 0 || this.hasTracers
+        ? Math.max(maxExteriorTempK, tracerPeakTemp)
+        : Math.max(telemetryMaxTempK, tracerPeakTemp);
     const ejectaFrac = clamp(
       Number.isFinite(telemetry.ejectaMassFrac) ? telemetry.ejectaMassFrac : 0.0,
       0.0,
@@ -463,11 +489,13 @@ export class ImpactBiosphereCoupler {
     );
     this.ejectaMassFrac = ejectaFrac;
 
-    // Detect impact onset cleanly
+    // Detect impact onset cleanly without false-triggering on intact 5500 K LivingTerra core
     const impactContact =
       this.hasImpactor && sepKm <= 1.28 * rKm;
     const thermalOrShockTrigger =
-      maxTempK > 650.0 ||
+      tracerPeakTemp > 650.0 ||
+      hotCount > 0 ||
+      (!this.hasTracers && pCount === 0 && !this.hasImpactor && telemetryMaxTempK > 650.0) ||
       tracerPeakDam > 0.05 ||
       tracerPeakOverp > 1.0 ||
       tracerPeakTsunami > 8.0 ||
@@ -505,15 +533,32 @@ export class ImpactBiosphereCoupler {
         const cx = hotX / hotWeightSum;
         const cy = hotY / hotWeightSum;
         const cz = hotZ / hotWeightSum;
-        // Compute spread around hot centroid
+        // Compute spread around hot centroid using the same exterior/plume filter
         let rSpreadSq = 0.0;
         for (let i = 0; i < pCount; i++) {
           const i4 = i * 4;
-          if (particles.props[i4] > 700.0) {
-            const i3 = i * 3;
-            const dx = particles.positionsKm[i3] - cx;
-            const dy = particles.positionsKm[i3 + 1] - cy;
-            const dz = particles.positionsKm[i3 + 2] - cz;
+          const bodyId = Math.round(particles.meta[i4 + 2]);
+          const phaseId = Math.round(particles.meta[i4 + 1]);
+          const i3 = i * 3;
+          const px = particles.positionsKm[i3];
+          const py = particles.positionsKm[i3 + 1];
+          const pz = particles.positionsKm[i3 + 2];
+          const dxLiving = px - this.livingComKm[0];
+          const dyLiving = py - this.livingComKm[1];
+          const dzLiving = pz - this.livingComKm[2];
+          const rFromLivingKm = Math.sqrt(
+            dxLiving * dxLiving + dyLiving * dyLiving + dzLiving * dzLiving
+          );
+          const isExteriorOrPlume =
+            phaseId === 2 ||
+            phaseId === 3 ||
+            (bodyId === 0
+              ? rFromLivingKm >= 0.88 * rKm
+              : !isApproachingFar || particles.props[i4 + 2] >= 0.15);
+          if (isExteriorOrPlume && particles.props[i4] > 700.0) {
+            const dx = px - cx;
+            const dy = py - cy;
+            const dz = pz - cz;
             rSpreadSq += dx * dx + dy * dy + dz * dz;
           }
         }
@@ -539,7 +584,7 @@ export class ImpactBiosphereCoupler {
         }
 
         const meanHotT = hotTempWeightedSum / hotWeightSum;
-        this.plumeTempK = Math.max(meanHotT, 0.72 * maxTempK, 1800.0);
+        this.plumeTempK = Math.max(meanHotT, 0.72 * effectivePeakTempK, 1800.0);
       } else {
         const plumeRKm = rKm * 1.25;
         this.plumeCenterKm.set(
@@ -548,11 +593,11 @@ export class ImpactBiosphereCoupler {
           this.livingComKm[2] + this.epicenterNormal.z * plumeRKm
         );
         this.plumeRadiusM = this.planetRadiusM * 0.18;
-        this.plumeTempK = Math.max(maxTempK, 2400.0);
+        this.plumeTempK = Math.max(effectivePeakTempK, 2400.0);
       }
 
       // Dimensionless severity combining temperature, ejecta, Q/Q_RD, disruption, and outcome
-      const tempFactor = clamp((maxTempK - 500.0) / 4500.0, 0.05, 2.5);
+      const tempFactor = clamp((effectivePeakTempK - 500.0) / 4500.0, 0.05, 2.5);
       const energyFactor = clamp(
         ejectaFrac * 18.0 + diskFrac * 8.0 + qRatio * 1.5,
         0.15,

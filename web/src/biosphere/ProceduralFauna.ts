@@ -67,15 +67,20 @@ export function transitionFaunaState(
     return 'Lethal';
   }
 
-  if (stim.radFluxKwM2 > 12.0 || stim.localTempK > 340.0) {
+  if (
+    stim.radFluxKwM2 > 12.0 ||
+    stim.localTempK > 340.0 ||
+    current === 'ThermalEscapeOrBurrow'
+  ) {
     return 'ThermalEscapeOrBurrow';
   }
 
   if (
-    stim.pgaG > 0.05 ||
-    stim.overpressureKpa > 2.0 ||
-    stim.radFluxKwM2 > 5.0 ||
-    current === 'StampedeOrMassFlight'
+    current === 'StampedeOrMassFlight' ||
+    (current === 'Alert' &&
+      (stim.pgaG > 0.05 ||
+        stim.overpressureKpa > 2.0 ||
+        stim.radFluxKwM2 > 5.0))
   ) {
     return 'StampedeOrMassFlight';
   }
