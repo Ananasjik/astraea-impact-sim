@@ -111,6 +111,7 @@ export class ControlPanel {
 
   private isPlaying = false;
   private cameraMode: CameraMode = 'OrbitalFree';
+  private displayedCameraMode: CameraMode | null = 'OrbitalFree';
   private activePreset = 'LivingGaiaAsteroidCataclysm';
 
   private readonly presetButtons = new Map<string, HTMLButtonElement>();
@@ -875,6 +876,10 @@ export class ControlPanel {
   }
 
   private setCameraModeDisplay(mode: CameraMode): void {
+    if (this.displayedCameraMode === mode) {
+      return;
+    }
+    this.displayedCameraMode = mode;
     this.cameraMode = mode;
     this.cameraModeToggleBtn.textContent =
       mode === 'OrbitalFree'

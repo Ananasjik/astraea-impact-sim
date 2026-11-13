@@ -503,10 +503,12 @@ export class SimulationApp {
         };
         renderer.domElement.addEventListener('webglcontextlost', onContextLost);
         this.cleanups.push(() => {
-          renderer.domElement.removeEventListener(
-            'webglcontextlost',
-            onContextLost
-          );
+          if (typeof renderer.domElement?.removeEventListener === 'function') {
+            renderer.domElement.removeEventListener(
+              'webglcontextlost',
+              onContextLost
+            );
+          }
         });
       }
       return renderer;
@@ -557,6 +559,9 @@ export class SimulationApp {
     this.cleanups.push(
       this.client.onPresetLoaded((msg) => {
         this.lastPresetName = msg.preset;
+        this.latestTelemetry = null;
+        this.particlePool.count = 0;
+        this.tracerPool.count = 0;
         this.coupler.resetBaseline();
         this.latestBio = this.coupler.getGlobalMetrics();
         this.telemetryCharts.clear();
@@ -717,12 +722,16 @@ export class SimulationApp {
       }
     };
 
-    pointerTarget.addEventListener('wheel', onWheel, { passive: false });
-    pointerTarget.addEventListener('pointerdown', onPointerDown);
-    this.cleanups.push(() => {
-      pointerTarget.removeEventListener('wheel', onWheel);
-      pointerTarget.removeEventListener('pointerdown', onPointerDown);
-    });
+    if (typeof pointerTarget.addEventListener === 'function') {
+      pointerTarget.addEventListener('wheel', onWheel, { passive: false });
+      pointerTarget.addEventListener('pointerdown', onPointerDown);
+      this.cleanups.push(() => {
+        if (typeof pointerTarget.removeEventListener === 'function') {
+          pointerTarget.removeEventListener('wheel', onWheel);
+          pointerTarget.removeEventListener('pointerdown', onPointerDown);
+        }
+      });
+    }
 
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('pointerup', onPointerUp);
@@ -730,10 +739,12 @@ export class SimulationApp {
       window.addEventListener('keydown', onKeyDown);
       window.addEventListener('resize', onResize);
       this.cleanups.push(() => {
-        window.removeEventListener('pointerup', onPointerUp);
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('keydown', onKeyDown);
-        window.removeEventListener('resize', onResize);
+        if (typeof window.removeEventListener === 'function') {
+          window.removeEventListener('pointerup', onPointerUp);
+          window.removeEventListener('pointermove', onPointerMove);
+          window.removeEventListener('keydown', onKeyDown);
+          window.removeEventListener('resize', onResize);
+        }
       });
     }
 

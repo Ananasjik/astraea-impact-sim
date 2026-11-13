@@ -385,7 +385,7 @@ export class TelemetryCharts {
       : 'astraea-pill astraea-pill-danger';
 
     this.virialVal.textContent = formatFixed(t.virialRatio, 3);
-    this.massFracsVal.textContent = `${(t.boundMassFrac * 100.0).toFixed(1)}% / ${(t.diskMassFrac * 100.0).toFixed(1)}% / ${(t.ejectaMassFrac * 100.0).toFixed(1)}%`;
+    this.massFracsVal.textContent = `${formatFixed(t.boundMassFrac * 100.0, 1)}% / ${formatFixed(t.diskMassFrac * 100.0, 1)}% / ${formatFixed(t.ejectaMassFrac * 100.0, 1)}%`;
     this.maxTempVal.textContent = `${formatCompactNum(t.maxTempK, 0)} K`;
     this.maxPressureVal.textContent = `${formatCompactNum(t.maxPressureGPa, 1)} GPa`;
     this.gpuStepVal.textContent = `${formatFixed(t.gpuStepMs, 2)} ms`;
