@@ -21,7 +21,7 @@
   `--headless=new --no-sandbox --disable-gpu-sandbox --disable-background-networking --disable-component-update --enable-webgl --ignore-gpu-blocklist --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`
 
 ## 3. Known Pitfalls & Workarounds
-- `gh auth status` in sandbox reported invalid token for account `Ananasjik` (re-check outside sandbox before push; never assume network inside sandbox).
+- `gh` CLI inside sandbox cannot access the GNOME/OS keyring or network (`HTTP 401` / invalid token error inside sandbox); running `gh` / `git push` outside sandbox authenticates cleanly as `Ananasjik` and pushed public repo `https://github.com/Ananasjik/astraea-impact-sim`.
 - Model policy: ONLY use `Gemini 4 Hydrogen (XHigh)` via `TypeName: "self"` + `Model: "inherit"` (or `define_subagent` with `Model: "inherit"`); NEVER invoke `argon`, `flash`, `pro`, `opus`, `sonnet`, or `research`.
 - Slow WebGL/SwiftShader clients must not trigger TCP kernel queue bloat (`30+ MiB` of queued binary frames causing stale UI/preset delays): `server/http_ws_server.cpp` caps `SO_SNDBUF` to `131072`, checks `TIOCOUTQ`, and drops intermediate streaming binary frames above `kStreamBackpressureBytes = 256 KiB` while preserving full `kMaxBroadcastQueueBytes` delivery for control transitions (`SetPreset`, `LaunchCustom`, `Step`).
 - `ImpactBiosphereCoupler` filters out intact deep molten core particles (`phaseId === 2`, e.g. 5500 K `LivingTerra` / 1800 K `ProtoTheia` interiors) and suppresses pre-contact hyperbolic approach / SPH settling noise (`preContactNoiseFloor` before contact) so biosphere survival starts at `99.999999%+` (`Nominal`) until real impact arrival.
