@@ -467,8 +467,8 @@ public:
     void loadScenario(const CollisionScenarioConfig& config);
     void relaxBody(uint8_t bodyId, uint32_t steps, double& outFinalVrmsOverVesc);
 
-    void step(double maxDtSec = 5.0);
-    void stepForDuration(double durationSec, double maxDtSec = 5.0);
+    TelemetrySnapshot step(double maxDtSec = 5.0);
+    TelemetrySnapshot stepForDuration(double durationSec, double maxDtSec = 5.0);
 
     void setTimeScale(double scale);
     void setSlicePlane(const SlicePlaneConfig& slice);

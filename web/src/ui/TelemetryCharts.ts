@@ -2,17 +2,18 @@ import type { BiomeId } from '../biosphere/BiomeSystem';
 import {
   ImpactBiosphereCoupler,
   type BiosphereMetrics,
-  type ExtinctionTier,
 } from '../biosphere/ImpactBiosphereCoupler';
 import type { FaunaGuild } from '../biosphere/ProceduralFauna';
 import type { TelemetrySnapshotDto } from '../net/SimClient';
 import {
   clampNum,
   ensureHudStyles,
+  extinctionBadgeClass,
   formatCompactNum,
   formatFixed,
   getOwnerDoc,
   makeEl,
+  outcomeBadgeClass,
 } from './hudUtils';
 
 const MAX_HISTORY_SAMPLES = 240;
@@ -64,35 +65,6 @@ const ENERGY_SERIES_COLORS = {
   eTot: '#facc15',
   drift: '#34d399',
 } as const;
-
-function outcomeBadgeClass(outcome: TelemetrySnapshotDto['outcome']): string {
-  switch (outcome) {
-    case 'CatastrophicDisruption':
-      return 'astraea-pill astraea-pill-danger';
-    case 'HitAndRun':
-    case 'GrazeAndMerge':
-      return 'astraea-pill astraea-pill-warn';
-    case 'Merging':
-      return 'astraea-pill astraea-pill-info';
-    case 'Approaching':
-    default:
-      return 'astraea-pill astraea-pill-ok';
-  }
-}
-
-function extinctionBadgeClass(tier: ExtinctionTier): string {
-  switch (tier) {
-    case 'Sterilization':
-      return 'astraea-pill astraea-pill-danger';
-    case 'MassExtinction':
-      return 'astraea-pill astraea-pill-warn';
-    case 'RegionalCrisis':
-      return 'astraea-pill astraea-pill-info';
-    case 'Nominal':
-    default:
-      return 'astraea-pill astraea-pill-ok';
-  }
-}
 
 function survivalBarColor(pct: number): string {
   if (pct >= 85.0) {

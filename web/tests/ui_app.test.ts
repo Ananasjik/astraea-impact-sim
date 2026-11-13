@@ -1961,9 +1961,12 @@ describe('Stage E6 Scientific UI', () => {
 
       // 1. onPreset
       const presetRe =
-        /EarthTheiaMoonForming|MercuryMantleStrip|OceanWorldSteamPlume|GasGiantCoreImpact|LivingGaiaAsteroidCataclysm|Earth[\s–-]*Theia|Mercury\s*Mantle|Ocean\s*World|Gas\s*Giant|Living\s*Gaia/i;
-      const presetSelect = allSelects.find((s) =>
-        s.options.some((o) => presetRe.test(`${o.value} ${o.textContent}`))
+        /EarthTheiaMoonForming|MercuryMantleStrip|OceanWorldSteamPlume|GasGiantCoreImpact|LivingGaiaAsteroidCataclysm|Earth[\s–-]+Theia|Mercury\s+Mantle|Ocean\s+World|Gas\s+Giant|Living\s+Gaia/i;
+      const presetSelect = allSelects.find(
+        (s) =>
+          s.options.filter((o) =>
+            presetRe.test(`${o.value} ${o.textContent}`)
+          ).length >= 2
       );
       if (presetSelect) {
         const targetOpt =

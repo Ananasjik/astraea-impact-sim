@@ -429,7 +429,6 @@ export class ImpactBiosphereCoupler {
 
       // Exclude intact planetary interiors (e.g., 5500 K LivingTerra core or approaching impactor core)
       const isExteriorOrPlume =
-        phaseId === 2 ||
         phaseId === 3 ||
         (bodyId === 0
           ? rFromLivingKm >= 0.88 * rKm
@@ -489,18 +488,20 @@ export class ImpactBiosphereCoupler {
     );
     this.ejectaMassFrac = ejectaFrac;
 
-    // Detect impact onset cleanly without false-triggering on intact 5500 K LivingTerra core
+    // Detect impact onset cleanly without false-triggering on intact planet interiors or settling jitter
     const impactContact =
       this.hasImpactor && sepKm <= 1.28 * rKm;
+    const preContactNoiseFloor = isApproachingFar;
+    const debrisTriggered =
+      !preContactNoiseFloor && (ejectaFrac > 0.002 || diskFrac > 0.002);
     const thermalOrShockTrigger =
-      tracerPeakTemp > 650.0 ||
+      tracerPeakTemp > (preContactNoiseFloor ? 900.0 : 650.0) ||
       hotCount > 0 ||
       (!this.hasTracers && pCount === 0 && !this.hasImpactor && telemetryMaxTempK > 650.0) ||
       tracerPeakDam > 0.05 ||
-      tracerPeakOverp > 1.0 ||
+      tracerPeakOverp > (preContactNoiseFloor ? 120.0 : 1.0) ||
       tracerPeakTsunami > 8.0 ||
-      ejectaFrac > 0.002 ||
-      diskFrac > 0.002 ||
+      debrisTriggered ||
       telemetry.outcome !== 'Approaching';
 
     if (!this.impactActive && (impactContact || thermalOrShockTrigger)) {

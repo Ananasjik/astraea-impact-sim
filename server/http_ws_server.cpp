@@ -8,6 +8,10 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <linux/sockios.h>
+#include <sys/ioctl.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -35,6 +39,7 @@ namespace {
 constexpr std::size_t kMaxHttpHeaderBytes = 65536u;
 constexpr std::size_t kMaxWsFrameBytes = 16u * 1024u * 1024u;
 constexpr std::size_t kMaxStaticFileBytes = 64u * 1024u * 1024u;
+constexpr std::size_t kStreamBackpressureBytes = 256u * 1024u;
 constexpr std::size_t kMaxBroadcastQueueBytes = 64u * 1024u * 1024u;
 
 enum class ConnState {
@@ -487,10 +492,23 @@ struct HttpWsServer::Impl {
         }
     }
 
-    void broadcastWsBinary(const std::vector<uint8_t>& rawPclsFrame) {
+    static std::size_t effectiveQueuedBytes(const ClientConn& c) {
+        std::size_t queued = c.totalQueuedBytes;
+#ifdef __linux__
+        if (c.fd >= 0) {
+            int outq = 0;
+            if (::ioctl(c.fd, TIOCOUTQ, &outq) == 0 && outq > 0) {
+                queued += static_cast<std::size_t>(outq);
+            }
+        }
+#endif
+        return queued;
+    }
+
+    void broadcastWsBinary(const std::vector<uint8_t>& rawPclsFrame, std::size_t maxQueueLimit = kMaxBroadcastQueueBytes) {
         const std::vector<uint8_t> frame = encodeWsBinaryFrame(rawPclsFrame);
         for (ClientConn& c : clients) {
-            if (c.state == ConnState::WebSocket && c.totalQueuedBytes <= kMaxBroadcastQueueBytes) {
+            if (c.state == ConnState::WebSocket && effectiveQueuedBytes(c) <= maxQueueLimit) {
                 std::vector<uint8_t> copy = frame;
                 queueBytes(c, std::move(copy));
             }
@@ -1121,6 +1139,8 @@ struct HttpWsServer::Impl {
             }
             const int nodelay = 1;
             (void)::setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+            const int sndBufBytes = 131072;
+            (void)::setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sndBufBytes, sizeof(sndBufBytes));
 
             ClientConn conn;
             conn.fd = clientFd;
@@ -1159,7 +1179,7 @@ struct HttpWsServer::Impl {
             return;
         }
 
-        broadcastWsBinary(binFrame);
+        broadcastWsBinary(binFrame, kStreamBackpressureBytes);
         broadcastWsText(serializeTelemetryDto(snap, playing, presetName));
     }
 };

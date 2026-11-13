@@ -1,3 +1,6 @@
+import type { ExtinctionTier } from '../biosphere/ImpactBiosphereCoupler';
+import type { TelemetrySnapshotDto } from '../net/SimClient';
+
 export function getOwnerDoc(container: HTMLElement): Document | null {
   if (container && container.ownerDocument) {
     return container.ownerDocument;
@@ -492,4 +495,35 @@ export function ensureHudStyles(doc: Document | null): void {
   styleEl.id = 'astraea-hud-styles';
   styleEl.textContent = HUD_CSS;
   doc.head.appendChild(styleEl);
+}
+
+/** Maps collision regime outcome to semantic HUD pill styling class. */
+export function outcomeBadgeClass(outcome: TelemetrySnapshotDto['outcome']): string {
+  switch (outcome) {
+    case 'CatastrophicDisruption':
+      return 'astraea-pill astraea-pill-danger';
+    case 'HitAndRun':
+    case 'GrazeAndMerge':
+      return 'astraea-pill astraea-pill-warn';
+    case 'Merging':
+      return 'astraea-pill astraea-pill-info';
+    case 'Approaching':
+    default:
+      return 'astraea-pill astraea-pill-ok';
+  }
+}
+
+/** Maps biosphere extinction tier to semantic HUD pill styling class. */
+export function extinctionBadgeClass(tier: ExtinctionTier): string {
+  switch (tier) {
+    case 'Sterilization':
+      return 'astraea-pill astraea-pill-danger';
+    case 'MassExtinction':
+      return 'astraea-pill astraea-pill-warn';
+    case 'RegionalCrisis':
+      return 'astraea-pill astraea-pill-info';
+    case 'Nominal':
+    default:
+      return 'astraea-pill astraea-pill-ok';
+  }
 }

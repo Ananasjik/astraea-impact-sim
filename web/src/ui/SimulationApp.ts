@@ -558,6 +558,8 @@ export class SimulationApp {
 
     this.cleanups.push(
       this.client.onPresetLoaded((msg) => {
+        const switchedPreset =
+          this.lastPresetName !== '' && msg.preset !== this.lastPresetName;
         this.lastPresetName = msg.preset;
         this.latestTelemetry = null;
         this.particlePool.count = 0;
@@ -566,6 +568,11 @@ export class SimulationApp {
         this.latestBio = this.coupler.getGlobalMetrics();
         this.telemetryCharts.clear();
         this.resetChunkCaches();
+        if (switchedPreset && this.cameraCtrl.mode === 'SurfaceLock') {
+          this.cameraCtrl.setMode('OrbitalFree');
+          this.cameraCtrl.setTargetAltitudeKm(18000.0);
+          this.controlPanel.setCameraReadout('OrbitalFree', 18000.0);
+        }
         if (this.errorToast !== null) {
           this.errorToast.style.display = 'none';
           this.errorToast.textContent = '';
@@ -586,6 +593,7 @@ export class SimulationApp {
             (this.lastPresetName || 'Simulation');
           this.topSimInfo.textContent = `${presetLabel} · ${header.particleCount.toLocaleString('en-US')} pts · ${header.tracerCount} tracers`;
         }
+        this.publishDebugState();
       })
     );
 

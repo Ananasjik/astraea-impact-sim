@@ -5,10 +5,12 @@ import type { VisMode } from '../render/SphParticleRenderer';
 import {
   clampNum,
   ensureHudStyles,
+  extinctionBadgeClass,
   formatAltitude,
   formatFixed,
   getOwnerDoc,
   makeEl,
+  outcomeBadgeClass,
 } from './hudUtils';
 
 export interface ControlPanelCallbacks {
@@ -126,6 +128,7 @@ export class ControlPanel {
   private readonly sliceOffsetValLabel: HTMLElement;
   private readonly cameraModeToggleBtn: HTMLButtonElement;
   private readonly altitudeReadout: HTMLElement;
+  private readonly outcomeBadge: HTMLElement;
   private readonly bioStateBadge: HTMLElement;
 
   // Custom scenario fields
@@ -213,12 +216,19 @@ export class ControlPanel {
 
     // 2. Transport Controls
     const transportSec = makeEl(doc, 'div', { className: 'astraea-section' });
-    transportSec.appendChild(
-      makeEl(doc, 'div', {
-        className: 'astraea-section-title',
-        text: 'Simulation Transport',
-      })
+    const transportHeader = makeEl(doc, 'div', {
+      className: 'astraea-section-title',
+    });
+    transportHeader.appendChild(
+      makeEl(doc, 'span', { text: 'Simulation Transport' })
     );
+    this.outcomeBadge = makeEl(doc, 'span', {
+      className: 'astraea-pill astraea-pill-ok',
+      text: 'Approaching',
+      testId: 'panel-outcome-badge',
+    });
+    transportHeader.appendChild(this.outcomeBadge);
+    transportSec.appendChild(transportHeader);
     const transportRow = makeEl(doc, 'div', { className: 'astraea-btn-row' });
     this.playPauseBtn = makeEl(doc, 'button', {
       className: 'astraea-btn astraea-btn-primary astraea-btn-center',
@@ -719,15 +729,11 @@ export class ControlPanel {
       this.setActivePresetButton(telemetry.preset);
     }
 
+    this.outcomeBadge.textContent = telemetry.outcome;
+    this.outcomeBadge.className = outcomeBadgeClass(telemetry.outcome);
+
     this.bioStateBadge.textContent = `${bio.extinctionTier} (${formatFixed(bio.overallSurvivalPct, 0)}%)`;
-    this.bioStateBadge.className =
-      bio.extinctionTier === 'Sterilization'
-        ? 'astraea-pill astraea-pill-danger'
-        : bio.extinctionTier === 'MassExtinction'
-          ? 'astraea-pill astraea-pill-warn'
-          : bio.extinctionTier === 'RegionalCrisis'
-            ? 'astraea-pill astraea-pill-info'
-            : 'astraea-pill astraea-pill-ok';
+    this.bioStateBadge.className = extinctionBadgeClass(bio.extinctionTier);
 
     // Sync custom slider readouts in case values were adjusted programmatically
     this.vRatioValLabel.textContent = clampNum(

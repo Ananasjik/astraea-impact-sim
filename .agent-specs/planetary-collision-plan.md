@@ -81,7 +81,7 @@
 - **Выход:** `web/src/ui/` (графики энергии/импульса/температуры/давления/вымирания, пресеты столкновений, конструктор параметров импактора $v/v_{esc}, b, M, \text{тип}$, экспорт CSV/JSON) + финальный отчёт верификации и обновление `.agents/MEMORY.md`.
 - **Критерий завершения:** `ctest`, `npx vitest run`, `tsc --noEmit`, `vite build` проходят полностью; сквозной прогон в `Chromium 156` против живого `sim_server` на RTX 4050 подтверждает стабильный FPS, 0 ошибок в консоли и корректные физические/биосферные графики для пресета столкновения с живой планетой.
 - **Покрывает:** `R-7` (и интеграция `R-1..R-7`)
-- **Статус:** `[ ]` — доказательство: —
+- **Статус:** `[x]` — доказательство: commit на `main`; `ctest --test-dir build --output-on-failure` (`30/30` Passed, 100%), `npm --prefix web run typecheck && npm --prefix web run build && npm --prefix web run test` (`5/5` files, `31/31` passed), и живой E2E прогон в headless `Chromium 156` (`SwiftShader WebGL2`) против `sim_server --particles 100000 --preset LivingGaiaAsteroidCataclysm --target-fps 20` (`AC-22 PASSED`: `0` JS/console/WebGL ошибок, `100,000` частиц + `1,536` трассеров, `survivalPct = 99.99999999999993% Nominal` без ложного падения от горячего ядра, все 6 `VisMode`, cross-section slice, `SurfaceLock` биом с `192` патчами и активными `flora`/`fauna`, `Play -> Pause`, переключение на `EarthTheiaMoonForming` со сбросом камеры в `OrbitalFree`). Обновлены `.agents/MEMORY.md` и `.agent-specs/planetary-collision-spec.md`.
 
 ### E7. Публикация в публичный репозиторий GitHub — исполнитель: `self` (оркестратор) — зависит от: `E6`
 - **Вход:** полностью протестированный и закоммиченный проект в ветке `main`, аккуратный `README.md` с научным описанием и инструкцией сборки/запуска.
