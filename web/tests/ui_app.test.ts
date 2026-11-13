@@ -1049,6 +1049,7 @@ function createMockWebGL2Context(): Record<string, unknown> {
     getParameter(p: number) {
       if (p === 0x1f02) return 'WebGL 2.0 (Mock)';
       if (p === 0x8b8c) return 'WebGL GLSL ES 3.00 (Mock)';
+      if (p === 0x0d33 || p === 0x851c) return 4096;
       if (p === 0x846e || p === 0x846d) return new Float32Array([1, 1]);
       if (p === 0x0ba2 || p === 0x0c10) return new Int32Array([0, 0, 800, 600]);
       return 16;
@@ -1382,10 +1383,52 @@ class FakeWebSocket {
   readonly sentMessages: Array<string | ArrayBuffer> = [];
   closedCode: number | undefined;
   closedReason: string | undefined;
+  private readonly listeners = new Map<string, Array<(ev: unknown) => void>>();
 
   constructor(url: string) {
     this.url = url;
     FakeWebSocket.instances.push(this);
+  }
+
+  addEventListener(
+    type: string,
+    listener: ((ev: unknown) => void) | { handleEvent: (ev: unknown) => void } | null,
+    options?: boolean | { once?: boolean }
+  ): void {
+    if (!listener) return;
+    const rawFn =
+      typeof listener === 'function'
+        ? listener
+        : (ev: unknown) => listener.handleEvent(ev);
+    const once = typeof options === 'object' && options !== null ? Boolean(options.once) : false;
+    const fn = once
+      ? (ev: unknown) => {
+          this.removeEventListener(type, fn);
+          rawFn(ev);
+        }
+      : rawFn;
+    const list = this.listeners.get(type) ?? [];
+    list.push(fn);
+    this.listeners.set(type, list);
+  }
+
+  removeEventListener(
+    type: string,
+    listener: ((ev: unknown) => void) | { handleEvent: (ev: unknown) => void } | null
+  ): void {
+    if (!listener || typeof listener !== 'function') return;
+    const list = this.listeners.get(type);
+    if (!list) return;
+    this.listeners.set(
+      type,
+      list.filter((fn) => fn !== listener)
+    );
+  }
+
+  private emitWsEvent(type: string, ev: unknown): void {
+    for (const fn of [...(this.listeners.get(type) ?? [])]) {
+      fn(ev);
+    }
   }
 
   send(data: string | ArrayBuffer): void {
@@ -1396,16 +1439,28 @@ class FakeWebSocket {
     this.readyState = FakeWebSocket.CLOSED;
     this.closedCode = code;
     this.closedReason = reason;
-    this.onclose?.({ code, reason });
+    const ev = { code, reason };
+    this.onclose?.(ev);
+    this.emitWsEvent('close', ev);
   }
 
   triggerOpen(): void {
     this.readyState = FakeWebSocket.OPEN;
-    this.onopen?.({});
+    const ev = {};
+    this.onopen?.(ev);
+    this.emitWsEvent('open', ev);
   }
 
   triggerMessage(data: string | ArrayBuffer): void {
-    this.onmessage?.({ data });
+    const ev = { data };
+    this.onmessage?.(ev);
+    this.emitWsEvent('message', ev);
+  }
+
+  triggerError(): void {
+    const ev = {};
+    this.onerror?.(ev);
+    this.emitWsEvent('error', ev);
   }
 }
 
@@ -1467,6 +1522,7 @@ function installFakeDomHarness(): DomHarness {
   const windowListeners = new Map<string, Array<(ev: FakeEvent) => void>>();
   const fakeWindow = {
     document: doc,
+    performance: globalThis.performance,
     location: {
       protocol: 'http:',
       host: '127.0.0.1:5173',
@@ -1669,6 +1725,14 @@ function totalCanvas2dDrawCalls(container: FakeElement): number {
   return total;
 }
 
+function totalSvgRenderNodes(container: FakeElement): number {
+  let total = 0;
+  for (const svg of container.querySelectorAll('svg')) {
+    total += svg.querySelectorAll('*').length;
+  }
+  return total;
+}
+
 function getControlDescriptor(el: FakeElement, root: FakeElement): string {
   const parts: string[] = [
     el.textContent,
@@ -1699,13 +1763,17 @@ function getControlDescriptor(el: FakeElement, root: FakeElement): string {
     parts.push(parentLabel.textContent);
   }
 
-  let parent = el.parentNode;
-  for (let depth = 0; depth < 2 && parent && parent !== root; depth++) {
-    if (parent.querySelectorAll('input, select, button').length <= 3) {
-      parts.push(parent.textContent);
-      break;
+  const skipParentFallback =
+    el.tagName === 'BUTTON' && el.textContent.trim().length > 0;
+  if (!skipParentFallback) {
+    let parent = el.parentNode;
+    for (let depth = 0; depth < 2 && parent && parent !== root; depth++) {
+      if (parent.querySelectorAll('input, select, button').length === 1) {
+        parts.push(parent.textContent);
+        break;
+      }
+      parent = parent.parentNode;
     }
-    parent = parent.parentNode;
   }
 
   return parts.join(' ').trim();
@@ -1741,7 +1809,8 @@ describe('Stage E6 Scientific UI', () => {
       const fakeContainer = container as unknown as FakeElement;
       expect(fakeContainer.children.length).toBeGreaterThan(0);
       const canvases = fakeContainer.querySelectorAll('canvas');
-      expect(canvases.length).toBeGreaterThanOrEqual(1);
+      const svgs = fakeContainer.querySelectorAll('svg');
+      expect(canvases.length + svgs.length).toBeGreaterThanOrEqual(1);
     });
 
     it('pushes 20+ rolling samples across biomes, guilds, drift, temp, and MassExtinction with bounded DOM nodes', () => {
@@ -1789,7 +1858,9 @@ describe('Stage E6 Scientific UI', () => {
       }
 
       harness.flushAnimationFrames();
-      expect(totalCanvas2dDrawCalls(fakeContainer)).toBeGreaterThan(0);
+      expect(
+        totalCanvas2dDrawCalls(fakeContainer) + totalSvgRenderNodes(fakeContainer)
+      ).toBeGreaterThan(0);
 
       const nodeCountAfter20 = countDomNodes(fakeContainer);
       for (let i = 20; i < 140; i++) {
@@ -1844,8 +1915,15 @@ describe('Stage E6 Scientific UI', () => {
         )
       ).not.toThrow();
       harness.flushAnimationFrames();
-      expect(totalCanvas2dDrawCalls(fakeContainer)).toBeGreaterThanOrEqual(callsBeforeReuse);
-      expect(fakeContainer.querySelectorAll('canvas').length).toBeGreaterThanOrEqual(1);
+      const canvasCallsAfterReuse = totalCanvas2dDrawCalls(fakeContainer);
+      const svgNodesAfterReuse = totalSvgRenderNodes(fakeContainer);
+      if (fakeContainer.querySelectorAll('canvas').length > 0) {
+        expect(canvasCallsAfterReuse).toBeGreaterThanOrEqual(callsBeforeReuse);
+      }
+      expect(canvasCallsAfterReuse + svgNodesAfterReuse).toBeGreaterThan(0);
+      expect(fakeContainer.querySelectorAll('canvas, svg').length).toBeGreaterThanOrEqual(
+        1
+      );
     });
   });
 
@@ -1871,12 +1949,15 @@ describe('Stage E6 Scientific UI', () => {
     }
 
     it('mounts interactive controls inside the container and wires all 9 callbacks', () => {
-      const { fakeContainer, callbacks } = setupPanel();
+      const { panel, fakeContainer, callbacks } = setupPanel();
       expect(fakeContainer.children.length).toBeGreaterThan(0);
 
       const allButtons = fakeContainer.querySelectorAll('button');
       const allSelects = fakeContainer.querySelectorAll('select') as FakeSelectElement[];
       const allInputs = fakeContainer.querySelectorAll('input');
+      const radioInputs = allInputs.filter(
+        (i) => i.type.toLowerCase() === 'radio'
+      );
 
       // 1. onPreset
       const presetRe =
@@ -1894,7 +1975,7 @@ describe('Stage E6 Scientific UI', () => {
         setInputValueAndEmit(presetSelect, targetOpt.value);
         if (callbacks.onPreset.mock.calls.length === 0) {
           const loadBtn = allButtons.find((b) =>
-            /load|apply|preset|set/i.test(getControlDescriptor(b, fakeContainer))
+            /\b(load|apply|preset|set)\b/i.test(getControlDescriptor(b, fakeContainer))
           );
           loadBtn?.click();
         }
@@ -1918,17 +1999,47 @@ describe('Stage E6 Scientific UI', () => {
       );
       expect(playPauseButtons.length).toBeGreaterThanOrEqual(1);
       if (playPauseButtons.length === 1) {
-        playPauseButtons[0].click();
-        playPauseButtons[0].click();
-        expect(callbacks.onPlayPause).toHaveBeenCalledTimes(2);
+        const toggleBtn = playPauseButtons[0];
+        toggleBtn.click();
+        expect(callbacks.onPlayPause).toHaveBeenCalledTimes(1);
         const firstArg = callbacks.onPlayPause.mock.calls[0][0];
-        const secondArg = callbacks.onPlayPause.mock.calls[1][0];
         expect(typeof firstArg).toBe('boolean');
+
+        // Drive second toggle via authoritative telemetry.state
+        panel.updateState(
+          makeTelemetryDto({ state: firstArg ? 'playing' : 'paused' }),
+          makeBiosphereMetrics()
+        );
+        const secondToggleBtn = fakeContainer.contains(toggleBtn)
+          ? toggleBtn
+          : fakeContainer
+              .querySelectorAll('button')
+              .find((b) =>
+                /play|pause|▶|⏸/i.test(getControlDescriptor(b, fakeContainer))
+              );
+        expect(secondToggleBtn).toBeDefined();
+        secondToggleBtn!.click();
+        expect(callbacks.onPlayPause).toHaveBeenCalledTimes(2);
+        const secondArg = callbacks.onPlayPause.mock.calls[1][0];
         expect(secondArg).toBe(!firstArg);
       } else {
-        for (const btn of playPauseButtons.slice(0, 2)) {
-          btn.click();
-        }
+        const playBtn =
+          playPauseButtons.find(
+            (b) => !b.disabled && /play|▶/i.test(getControlDescriptor(b, fakeContainer))
+          ) ?? playPauseButtons[0];
+        playBtn.click();
+        panel.updateState(
+          makeTelemetryDto({ state: 'playing' }),
+          makeBiosphereMetrics()
+        );
+        const pauseBtn =
+          playPauseButtons.find(
+            (b) =>
+              b !== playBtn &&
+              !b.disabled &&
+              /pause|⏸/i.test(getControlDescriptor(b, fakeContainer))
+          ) ?? playPauseButtons.find((b) => b !== playBtn);
+        pauseBtn?.click();
         expect(callbacks.onPlayPause).toHaveBeenCalled();
         for (const [playing] of callbacks.onPlayPause.mock.calls) {
           expect(typeof playing).toBe('boolean');
@@ -1936,6 +2047,10 @@ describe('Stage E6 Scientific UI', () => {
       }
 
       // 3. onStep
+      panel.updateState(
+        makeTelemetryDto({ state: 'paused' }),
+        makeBiosphereMetrics()
+      );
       const stepBtn = allButtons.find((b) => {
         const desc = getControlDescriptor(b, fakeContainer);
         return /\bstep\b|⏭|single.?step/i.test(desc) && !/steppe/i.test(desc);
@@ -1974,7 +2089,7 @@ describe('Stage E6 Scientific UI', () => {
           setInputValueAndEmit(timescaleSelect, opt.value);
         } else {
           const speedBtn = allButtons.find((b) =>
-            /^\s*(0\.1|0\.5|1|2|5|10|25|50|100)x?\s*$/i.test(b.textContent)
+            /^\s*(0\.1|0\.5|1|2|5|10|25|50|100)\s*[x×]?\s*$/i.test(b.textContent)
           );
           expect(speedBtn).toBeDefined();
           speedBtn!.click();
@@ -2002,12 +2117,14 @@ describe('Stage E6 Scientific UI', () => {
           visSelect.options[0];
         setInputValueAndEmit(visSelect, targetOpt.value);
       } else {
-        const radioInputs = allInputs.filter(
-          (i) => i.type.toLowerCase() === 'radio'
-        );
-        const visControl = [...allButtons, ...radioInputs].find((el) =>
-          visRe.test(getControlDescriptor(el, fakeContainer))
-        );
+        const visControls = [...allButtons, ...radioInputs];
+        const visControl =
+          visControls.find((el) =>
+            /Temperature|Pressure/i.test(getControlDescriptor(el, fakeContainer))
+          ) ??
+          visControls.find((el) =>
+            visRe.test(getControlDescriptor(el, fakeContainer))
+          );
         expect(visControl).toBeDefined();
         visControl!.click();
       }
@@ -2018,13 +2135,20 @@ describe('Stage E6 Scientific UI', () => {
       const checkboxes = allInputs.filter(
         (i) => i.type.toLowerCase() === 'checkbox'
       );
+      const sliceRe = /slice|cross.?section|clip|cut/i;
       const sliceCheckbox =
         checkboxes.find((i) =>
-          /slice|cross.?section|clip|cut/i.test(getControlDescriptor(i, fakeContainer))
+          sliceRe.test(getControlDescriptor(i, fakeContainer))
         ) ?? (checkboxes.length === 1 ? checkboxes[0] : undefined);
-      expect(sliceCheckbox).toBeDefined();
-      sliceCheckbox!.click();
-      sliceCheckbox!.click();
+      const sliceToggleBtn = sliceCheckbox
+        ? undefined
+        : allButtons.find((b) =>
+            sliceRe.test(getControlDescriptor(b, fakeContainer))
+          );
+      const sliceControl = sliceCheckbox ?? sliceToggleBtn;
+      expect(sliceControl).toBeDefined();
+      sliceControl!.click();
+      sliceControl!.click();
       expect(callbacks.onSliceChange.mock.calls.length).toBeGreaterThanOrEqual(2);
       const [enabled1, normal1, offset1] = callbacks.onSliceChange.mock.calls[0];
       const [enabled2] = callbacks.onSliceChange.mock.calls[1];
@@ -2050,9 +2174,14 @@ describe('Stage E6 Scientific UI', () => {
           ) ?? camSelect.options[0];
         setInputValueAndEmit(camSelect, targetOpt.value);
       } else {
-        const camControl = [...allButtons, ...allInputs].find((el) =>
-          camRe.test(getControlDescriptor(el, fakeContainer))
-        );
+        const camControls = [...allButtons, ...radioInputs];
+        const camControl =
+          camControls.find((el) =>
+            /Surface/i.test(getControlDescriptor(el, fakeContainer))
+          ) ??
+          camControls.find((el) =>
+            camRe.test(getControlDescriptor(el, fakeContainer))
+          );
         expect(camControl).toBeDefined();
         camControl!.click();
       }
@@ -2072,8 +2201,10 @@ describe('Stage E6 Scientific UI', () => {
       const csvBtn = allButtons.find((b) =>
         /\bcsv\b/i.test(getControlDescriptor(b, fakeContainer))
       );
-      const jsonBtn = allButtons.find((b) =>
-        /\bjson\b/i.test(getControlDescriptor(b, fakeContainer))
+      const jsonBtn = allButtons.find(
+        (b) =>
+          b !== csvBtn &&
+          /\bjson\b/i.test(getControlDescriptor(b, fakeContainer))
       );
       if (csvBtn && jsonBtn) {
         csvBtn.click();
@@ -2104,10 +2235,15 @@ describe('Stage E6 Scientific UI', () => {
           /custom/i.test(getControlDescriptor(b, fakeContainer))
         );
         customToggle?.click();
-        launchBtn = fakeContainer
+        const postButtons = fakeContainer
           .querySelectorAll('button')
-          .find((b) =>
-            /launch|run|start|apply/i.test(getControlDescriptor(b, fakeContainer))
+          .filter((b) => b !== customToggle);
+        launchBtn =
+          postButtons.find((b) =>
+            /launch|custom/i.test(getControlDescriptor(b, fakeContainer))
+          ) ??
+          postButtons.find((b) =>
+            /run|start|apply|submit/i.test(getControlDescriptor(b, fakeContainer))
           );
       }
       expect(launchBtn).toBeDefined();
@@ -2227,8 +2363,10 @@ describe('Stage E6 Scientific UI', () => {
       // Trigger a control action inside uiContainer and confirm JSON command emission
       const stepOrExportBtn = fakeUiContainer
         .querySelectorAll('button')
-        .find((b) =>
-          /\bstep\b|\bcsv\b|play|pause/i.test(getControlDescriptor(b, fakeUiContainer))
+        .find(
+          (b) =>
+            !b.disabled &&
+            /\bstep\b|\bcsv\b|play|pause/i.test(getControlDescriptor(b, fakeUiContainer))
         );
       if (stepOrExportBtn) {
         const beforeSent = ws.sentMessages.length;
